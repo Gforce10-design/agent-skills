@@ -1,0 +1,398 @@
+{
+  "capability_profile_version": "2.0.0",
+  "captured_at": "2026-09-06",
+  "stale_after_days": 30,
+  "backends_source_sha256": "767380b2a18937e99bdb22b164f6126912c5283f35e007f64f9c82f885dc52f6",
+  "backends_semantic_sha256": "acc0b3cf153253b0e4c0ef51d23c0a3a6490ae82b3531a51af6dd3b4fa272acc",
+  "_naming_note": "This is a dispatcher-configured loadout snapshot plus a vendor-CLI probe. It is NOT observed runtime behaviour. 'dispatcher' = what backends.json asks for. 'vendor_cli' = what the CLI itself offers. requested != observed. Past stale_after_days, lower recommendation confidence — never assume it is current.",
+  "economy": {
+    "_note": "Economy availability is a PROPERTY OF THE PATH, not of the fleet. A single fleet-wide economy flag would be a false statement, because the DIRECT path does have lower tiers even though no delegate worker is pinned to one.",
+    "delegate_economy_loadout_available": false,
+    "delegate_economy_reason": "Every worker in backends.json is pinned to a premium/frontier loadout (opus·max, gpt-5.6-sol·high, Gemini 3.1 Pro (High), grok-4.5·high). No worker is pinned to haiku, luna, or Flash.",
+    "direct_lower_tier_selection_available": true,
+    "direct_lower_tier_reason": "The current session can switch to a cheaper model/effort via /model and /effort.",
+    "cost_comparison_status": "unmeasured",
+    "cost_comparison_note": "No paired direct-vs-delegated end-to-end observations exist. Delegation cannot buy a tier-based saving here, but whether its TOTAL cost exceeds DIRECT is unmeasured — switching the session model also invalidates the prompt cache, and a delegate receives a small distilled spec rather than the whole session context."
+  },
+  "_probe_sources": {
+    "dispatcher": "/Users/gimsuyeong/Developer/VibeCoding/_shared/backends.json",
+    "pin_site": "/Users/gimsuyeong/Developer/VibeCoding/_shared/adapters/call_worker.sh",
+    "claude": "claude --help (2.1.263)",
+    "grok": "grok models (1.0.13)",
+    "agy": "agy models (1.1.27)",
+    "codex": "codex --help (0.153.0) + ~/.codex/config.toml + 라이브 --model 프로브",
+    "_codex_live_probe": "2026-09-06: gpt-6-astra·gpt-5.6-sol·gpt-5.6-luna·gpt-5.6-terra 각각 `codex exec --ephemeral --json -s read-only --model <m>` 로 응답 확인. 양성 대조: 존재하지 않는 id 는 provider 400 ('not supported when using Codex with a ChatGPT account')."
+  },
+  "_rules": {
+    "effort_rank_scope": "effort_rank orders values ONLY within the same comparison_scope. Never add, subtract, or compare ranks across different comparison_scope values.",
+    "no_auto_to_medium": "Never convert 'auto' or 'config' to 'medium' or any concrete level without an observation.",
+    "unsupported_is_null": "An unsupported dial is effort_rank=null with effort_semantics='unsupported'.",
+    "observed_wins": "If effort_observed or model_observed is present and differs from requested, the observed value is authoritative.",
+    "no_invented_models": "Never recommend a model that is not listed in vendor_cli.models for that surface.",
+    "surface_lock": "Codex direct recommendations use only codex-cli.recommendation_models. Claude direct recommendations use only claude-code.recommendation_models.",
+    "quality_before_cost": "Resolve the minimum sufficient quality floor first. Availability and cost/quota may only break ties among candidates that pass it.",
+    "fable_rollout": "Fable 5 is shadow-only for V2 controlled and V3 recommendation-only evaluation. Production eligibility uses V3-only evidence and requires 20 diverse real-task successes, zero failures or partials, an independent verifier, and explicit opt-in."
+  },
+  "cross_vendor_prior_policy": {
+    "resolver_effect": "none_until_comparable_local_evidence",
+    "cross_vendor_equivalence_claim": false,
+    "public_benchmark_status": "informational_only",
+    "comparison_requirements": [
+      "same task family",
+      "same agent scaffold and tool budget",
+      "same deterministic acceptance check",
+      "reported cost/quota units with matching basis"
+    ],
+    "initial_role_analogy_not_equivalence": {
+      "gpt-5.6-luna": "haiku-4.5",
+      "gpt-5.6-terra": "sonnet-5",
+      "gpt-5.6-sol": "opus-5"
+    },
+    "fable_note": "Fable 5 has no automatic cross-vendor analogue or superiority prior."
+  },
+  "workers": {
+    "claude-main": {
+      "surface": "claude-code-cli",
+      "vendor": "anthropic",
+      "dispatcher": {
+        "model_requested": "opus",
+        "effort_requested": "max",
+        "model_observed": null,
+        "effort_observed": null,
+        "observation_source": "backends_config",
+        "observation_status": "requested_not_verified",
+        "source_ref": "backends.json workers.claude-main.cli.args_template",
+        "tier_class": "premium",
+        "cost_rank_cross_vendor": "unknown",
+        "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
+        "economy_loadout": false
+      },
+      "vendor_cli": {
+        "models": [
+          "haiku-4.5",
+          "sonnet-4.6",
+          "sonnet-5",
+          "opus-4.6",
+          "opus-4.7",
+          "opus-4.8",
+          "opus-5",
+          "fable-5"
+        ],
+        "models_note": "Inventory confirmed from the current Claude model selector supplied by the operator. Availability is a UI snapshot, not a benchmark ranking.",
+        "effort_values": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "effort_semantics": "reasoning_depth",
+        "comparison_scope": "anthropic:claude-code",
+        "cross_vendor_comparable": false,
+        "source": "claude --help"
+      },
+      "delegation_selectable": false,
+      "delegation_note": "backends.json fixes this worker to opus/max. The skill does not modify the dispatcher, so model/effort here are a PROPERTY of the worker, displayed only — not an independent dial.",
+      "tier_ladder": {
+        "order": [
+          "haiku-4.5",
+          "sonnet-5",
+          "opus-5"
+        ],
+        "applies_to": "direct_execution_only",
+        "escalation_status": "available_for_direct_session_only",
+        "excluded_experimental": [
+          "fable-5"
+        ]
+      }
+    },
+    "grok-adversarial": {
+      "surface": "grok-cli",
+      "vendor": "xai",
+      "dispatcher": {
+        "model_requested": "grok-4.5",
+        "effort_requested": "high",
+        "model_observed": null,
+        "effort_observed": null,
+        "observation_source": "backends_config",
+        "observation_status": "requested_not_verified",
+        "source_ref": "backends.json workers.grok-adversarial.cli.args_template",
+        "tier_class": "sole_available",
+        "cost_rank_cross_vendor": "unknown",
+        "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
+        "economy_loadout": false
+      },
+      "vendor_cli": {
+        "models": [
+          "grok-4.6",
+          "grok-4.5"
+        ],
+        "default_model": "grok-4.6",
+        "effort_values": null,
+        "effort_values_status": "undocumented_in_help",
+        "effort_semantics": "reasoning_depth",
+        "comparison_scope": "xai:grok-4.5",
+        "cross_vendor_comparable": false,
+        "source": "grok models (2026-09-06, grok 1.0.13): 'Default model: grok-4.6 / Available models: grok-4.6 (default), grok-4.5'. grok-composer-2.5-fast 는 2026-07-16 목록에 있었으나 지금은 나오지 않는다."
+      },
+      "delegation_selectable": false,
+      "tier_ladder": {
+        "next_tier": null,
+        "escalation_status": "no_higher_tier_available",
+        "reason": "grok-4.5 is the default and highest listed model. grok-composer-2.5-fast is a different-purpose fast model, not a higher tier. Recommending a tier increase here would invent a model that does not exist."
+      }
+    },
+    "agy-compat": {
+      "surface": "agy-cli",
+      "vendor": "multi",
+      "vendor_note": "agy is itself a multi-vendor surface: it serves Google, Anthropic and open-source models. 'agy-compat = Google' is an incorrect vendor attribution.",
+      "dispatcher": {
+        "model_requested": "Gemini 3.1 Pro (High)",
+        "effort_requested": "model-high",
+        "model_observed": null,
+        "effort_observed": null,
+        "observation_source": "backends_config",
+        "observation_status": "requested_not_verified",
+        "pinned_by": "call_worker.sh L834-847 — exact args_template array match; the model string is hardcoded in the dispatcher script itself",
+        "tier_class": "premium",
+        "cost_rank_cross_vendor": "unknown",
+        "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
+        "economy_loadout": false
+      },
+      "vendor_cli": {
+        "models": [
+          "Gemini 3.8 Flash (High)",
+          "Gemini 3.8 Flash (Medium)",
+          "Gemini 3.8 Flash (Low)",
+          "Gemini 3.7 Flash (High)",
+          "Gemini 3.7 Flash (Medium)",
+          "Gemini 3.7 Flash (Low)",
+          "Gemini 3.6 Flash (High)",
+          "Gemini 3.6 Flash (Medium)",
+          "Gemini 3.6 Flash (Low)",
+          "Gemini 3.1 Pro (High)",
+          "Gemini 3.1 Pro (Low)",
+          "Claude Sonnet 4.6 (Thinking)",
+          "Claude Opus 4.6 (Thinking)",
+          "GPT-OSS 120B (Medium)"
+        ],
+        "effort_values": null,
+        "effort_rank": null,
+        "effort_semantics": "embedded_in_model",
+        "effort_semantics_note": "There is no separate effort dial. The level is part of the model name, e.g. 'Gemini 3.1 Pro (High)'. Gemini 3.1 Pro offers only Low and High.",
+        "comparison_scope": "agy:embedded",
+        "cross_vendor_comparable": false,
+        "source": "agy models (2026-09-06, agy 1.1.27). 2026-07-16 목록의 Gemini 3.5 Flash 3종은 더 이상 나오지 않고 3.6·3.7·3.8 Flash 각 3종이 새로 있다.",
+        "model_ids": [
+          "gemini-3.8-flash-high",
+          "gemini-3.8-flash-medium",
+          "gemini-3.8-flash-low",
+          "gemini-3.7-flash-high",
+          "gemini-3.7-flash-medium",
+          "gemini-3.7-flash-low",
+          "gemini-3.6-flash-high",
+          "gemini-3.6-flash-medium",
+          "gemini-3.6-flash-low",
+          "gemini-3.1-pro-high",
+          "gemini-3.1-pro-low",
+          "claude-sonnet-4-6",
+          "claude-opus-4-6-thinking",
+          "gpt-oss-120b-medium"
+        ],
+        "_id_note": "`agy models` 는 `<id>\\t<표시명>` 두 형식을 함께 낸다. dispatcher 의 `--model` 인자는 **표시명**을, backends.json 의 `model` 필드는 **id** 를 쓴다. 둘 다 바뀌면 둘 다 고쳐야 한다."
+      },
+      "delegation_selectable": false,
+      "tier_ladder": {
+        "next_tier": null,
+        "escalation_status": "pinned_by_dispatcher",
+        "reason": "call_worker.sh exact-matches the args_template for agy-compat only. Any other model is rejected by the dispatcher, so there is no selectable ladder without a dispatcher change (out of scope)."
+      }
+    },
+    "codex-main": {
+      "surface": "codex-cli",
+      "vendor": "openai",
+      "dispatcher": {
+        "model_requested": "codex-default",
+        "effort_requested": "config",
+        "effort_semantics": "externally_configured",
+        "model_observed": null,
+        "effort_observed": null,
+        "observation_source": "backends_config",
+        "observation_status": "requested_not_verified",
+        "resolved_from": "~/.codex/config.toml",
+        "resolved_model": "gpt-5.6-sol",
+        "resolved_effort": "high",
+        "resolution_note": "'codex-default'/'config' is an unresolved indirection in backends.json. config.toml resolves it, but a session override would change it — do not treat the resolved value as observed.",
+        "tier_class": "frontier",
+        "cost_rank_cross_vendor": "unknown",
+        "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
+        "economy_loadout": false
+      },
+      "vendor_cli": {
+        "models": [
+          "gpt-5.6-sol",
+          "gpt-5.6-terra",
+          "gpt-5.6-luna",
+          "gpt-6-astra"
+        ],
+        "models_status": "from_vendor_docs_not_cli_enumeration",
+        "effort_values": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "effort_semantics": "reasoning_depth",
+        "comparison_scope": "openai:gpt-5.6",
+        "cross_vendor_comparable": false,
+        "source": "codex --help (-m/--model, -c model_reasoning_effort) + vendor docs",
+        "default_model": "gpt-6-astra"
+      },
+      "delegation_selectable": false,
+      "tier_ladder": {
+        "order": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol"
+        ],
+        "applies_to": "direct_execution_only",
+        "escalation_status": "available_for_direct_session_only"
+      }
+    },
+    "codex-critic": {
+      "surface": "codex-cli",
+      "vendor": "openai",
+      "alias_of": "codex-main",
+      "dispatcher": {
+        "model_requested": "codex-default",
+        "effort_requested": "config",
+        "effort_semantics": "externally_configured",
+        "model_observed": null,
+        "effort_observed": null,
+        "observation_source": "backends_config",
+        "observation_status": "requested_not_verified",
+        "resolved_from": "~/.codex/config.toml",
+        "resolved_model": "gpt-5.6-sol",
+        "resolved_effort": "high",
+        "resolution_note": "'codex-default'/'config' is an unresolved indirection in backends.json. config.toml resolves it, but a session override would change it — do not treat the resolved value as observed.",
+        "tier_class": "frontier",
+        "cost_rank_cross_vendor": "unknown",
+        "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
+        "economy_loadout": false
+      },
+      "delegation_selectable": false,
+      "role_note": "Same executable and config as codex-main; distinct Mission role (reviewer). Producer and evaluator must differ."
+    },
+    "gemini": {
+      "surface": "agy-cli",
+      "vendor": "multi",
+      "alias_of": "agy-compat",
+      "dispatcher": {
+        "model_requested": "Gemini 3.1 Pro (High)",
+        "effort_requested": "model-high",
+        "model_observed": null,
+        "effort_observed": null,
+        "observation_source": "backends_config",
+        "observation_status": "requested_not_verified",
+        "pinned_by": "call_worker.sh L834-847 — exact args_template array match; the model string is hardcoded in the dispatcher script itself",
+        "tier_class": "premium",
+        "cost_rank_cross_vendor": "unknown",
+        "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
+        "economy_loadout": false
+      },
+      "delegation_selectable": false,
+      "role_note": "Compatibility alias of agy-compat; fixed loadout and evidence cohort are shared."
+    }
+  },
+  "direct_execution": {
+    "_note": "The ONLY place a real 2-axis ladder exists: the current session's own model/effort, changeable by the operator with /model and /effort.",
+    "claude-code": {
+      "models": [
+        "haiku-4.5",
+        "sonnet-4.6",
+        "sonnet-5",
+        "opus-4.6",
+        "opus-4.7",
+        "opus-4.8",
+        "opus-5",
+        "fable-5"
+      ],
+      "recommendation_models": [
+        "haiku-4.5",
+        "sonnet-5",
+        "opus-5"
+      ],
+      "quality_floor": {
+        "shallow_low_failcost": "haiku-4.5",
+        "mid": "sonnet-5",
+        "deep_or_high_failcost": "opus-5"
+      },
+      "experimental_models": [
+        "fable-5"
+      ],
+      "effort_values": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_semantics": "reasoning_depth",
+      "comparison_scope": "anthropic:claude-code",
+      "normal_effort_ceiling": "high",
+      "switch_commands": [
+        "/model <model>",
+        "/effort <level>"
+      ]
+    },
+    "codex-cli": {
+      "models": [
+        "gpt-5.3-codex-spark",
+        "gpt-5.4-mini",
+        "gpt-5.4",
+        "gpt-5.5",
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol",
+        "gpt-6-astra"
+      ],
+      "recommendation_models": [
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol",
+        "gpt-6-astra"
+      ],
+      "quality_floor": {
+        "shallow_low_failcost": "gpt-5.6-luna",
+        "mid": "gpt-5.6-terra",
+        "deep_or_high_failcost": "gpt-6-astra"
+      },
+      "effort_values": [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "effort_semantics": "reasoning_depth",
+      "comparison_scope": "openai:gpt-5.6",
+      "normal_effort_ceiling": "high",
+      "switch_commands": [
+        "codex -m <model> -c model_reasoning_effort=<effort>",
+        "/model"
+      ],
+      "default_model": "gpt-6-astra",
+      "_scope_note": "gpt-6-astra 는 gpt-5.6 과 다른 세대지만 effort 다이얼이 같다(model_reasoning_effort: low..max). comparison_scope 는 _scope_of() 의 **조회 키**라 모델 버전을 따라 바꾸면 안 된다 — 2026-09-06 에 'openai:gpt-5.6+gpt-6' 로 바꿨다가 시험이 깨져 되돌렸다. 같은 이유로 agy 는 'agy:embedded', grok 은 'xai:grok-4.5' 를 유지한다."
+    }
+  },
+  "cold_start_prior": {
+    "_note": "Tie-break ONLY when there is no verified registry evidence. Not a permanent quality ranking.",
+    "codex-main": "integration, fan-in, architecture, small direct implementation",
+    "claude-main": "implementation from a settled spec, codebase work, draft production",
+    "grok-adversarial": "counter-examples, adversarial review, logical blind spots",
+    "agy-compat": "compatibility checks, format work, alternate-vendor perspective"
+  }
+}

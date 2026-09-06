@@ -1,0 +1,23 @@
+[
+  {"query": "opus goal로 이 API 마이그레이션을 모든 호출부가 컴파일되고 테스트 통과할 때까지 굴려줘", "should_trigger": true},
+  {"query": "골 평가자를 haiku 말고 opus로 바꿔서 이 리팩터가 끝날 때까지 자율로 돌리고 싶어", "should_trigger": true},
+  {"query": "keep working until all the tests in test/auth pass, but i don't trust the fast model to judge whether it's actually done — use opus to evaluate completion", "should_trigger": true},
+  {"query": "이 백로그 이슈들 큐가 빌 때까지 멈추지 말고 처리하는데, 끝났는지 판정만큼은 정확한 모델이 봐줬으면 좋겠어. cheap 모델이 자꾸 가짜로 done 처리해서 답답해", "should_trigger": true},
+  {"query": "set up a goal that keeps Claude going until CHANGELOG.md has an entry for every PR merged this week, and make the completion check run on opus instead of the default fast model", "should_trigger": true},
+  {"query": "opus 평가자로 골 걸어서 controlTowerV25 PWA 어댑터 fixture 다 제거되고 provenance 배지 뜰 때까지 완주시켜줘", "should_trigger": true},
+  {"query": "아까 그 opus 골 다시 걸어줘. 이번 조건은 'awo 테스트 전부 green이고 traceability gate PASS'로", "should_trigger": true},
+  {"query": "I want an autonomous until-condition loop where the 'is it really finished' judge is a strong model — too many false completions from the cheap judge. condition: every TODO/FIXME in src/ resolved and the build is green", "should_trigger": true},
+  {"query": "골 끝났으니까 아까 건 opus 평가 hook 좀 떼줘, teardown 해줘", "should_trigger": true},
+  {"query": "큰 작업 하나를 끝날 때까지 멈추지 말고 굴리고 싶은데 완료 판정만큼은 opus가 보게 해줘", "should_trigger": true},
+
+  {"query": "/goal 명령이 완료 판정에 어떤 모델을 쓰는지, haiku인지 opus인지 그냥 설명만 해줘", "should_trigger": false},
+  {"query": "이 Stop hook이 왜 매 턴마다 도는지 디버그 좀 해줘, settings.local.json에 뭐가 들었는지 봐줘", "should_trigger": false},
+  {"query": "ralph-loop으로 이 리팩터 작업 밤새 brute-force로 돌려줘 --max-iterations 50", "should_trigger": false},
+  {"query": "세션 모델을 opus로 바꿔줘, /model opus", "should_trigger": false},
+  {"query": "5분마다 배포 상태랑 CI 통과했는지 확인하는 /loop 하나 걸어줘", "should_trigger": false},
+  {"query": "이 파이썬 함수에서 goal 이라는 변수 이름을 target_state로 전부 바꿔줘", "should_trigger": false},
+  {"query": "어제 찍은 축구 경기 골 장면들만 모아서 하이라이트 영상으로 편집해줘", "should_trigger": false},
+  {"query": "settings.json에 PostToolUse hook 추가해서 Edit 후에 prettier 자동으로 돌게 하는 법 알려줘", "should_trigger": false},
+  {"query": "테스트가 지금 다 통과하는지 한 번만 돌려서 결과 보여줘", "should_trigger": false},
+  {"query": "opus-goal 스킬 set_opus_goal.py 코드 좀 리뷰해줘, 머지 로직에 버그 없는지", "should_trigger": false}
+]

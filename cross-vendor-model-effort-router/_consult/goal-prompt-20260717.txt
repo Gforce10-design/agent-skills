@@ -1,0 +1,107 @@
+/goal 다음 완료조건을 모두 충족하거나 8턴 또는 30분에 도달하면 즉시 멈추고 최종 보고하라. 대상은 ~/.agents/skills/cross-vendor-model-effort-router 한 스킬뿐이다. dispatcher/call_worker.sh, backends.json, 멀티에이전트 시스템, global settings는 절대 수정하지 않는다. push·merge·외부발행은 사람 승인 전 실행 금지다. 가역 작업이 권한 요청으로 막히면 사용자에게 중간 질문하지 말고 EVIDENCE_INSUFFICIENT로 기록한 뒤 나머지 작업을 계속하라.
+
+현재 승인된 사실: HEAD=b6da5ee, branch=codex/ct-pwa-remaining-source-20260619, origin=Gforce10-design/VibeCoding보다 1커밋 앞, description v2=883자, A0 실측은 T3 implicit utility-salient 4/4, 정보성 NEG 0/2, 사소 NEG 0/1, T2 generic substantial 0/2이며 T2는 결함이 아닌 잘못된 positive label로 재분류됨. 77 unittest green, legacy registry SHA 8f5ccd9e... 불변, dispatcher/backends diff 없음, Claude/Codex symlink hot-load 확인. 이 사실은 로컬 증거와 일치하는지 확인하되 trigger API 실험을 다시 실행하지 마라.
+
+완료할 가역 작업:
+
+1) BASELINE AUDIT
+git root/HEAD/branch/status/remotes/upstream/ahead-behind를 확인하고, b6da5ee의 전체 diff 약 282줄을 경로별로 분류하라:
+- router-owned
+- pre-existing-unrelated
+- uncertain
+
+working tree의 약 98줄 미관련 변경은 reset·stage·commit하지 마라. 가능하면 git fetch origin은 최대 1회만 수행하고, 실패하면 보고하라.
+
+2) A0 CLOSURE
+기존 raw stream-json, eval report 또는 현재 세션 transcript에 증거가 있으면 구조적 조건
+content.type=="tool_use"
+AND content.name=="Skill"
+AND content.input.skill=="cross-vendor-model-effort-router"
+으로 위 수치를 재검산하라.
+
+raw evidence가 없으면 재실행하지 말고 EVIDENCE_INSUFFICIENT로 표시하라. description v2는 동결하며 T2를 잡기 위한 추가 수정은 금지한다.
+
+Track B(--resume/--continue)는 실행하지 않는다. fresh implicit utility-salient 4/4로 핵심 가설이 이미 검증됐으며, 실제 workflow-context 결함이 관측되기 전에는 추가 가치가 낮다.
+
+3) INTEGRITY
+전체 unittest를 1회 실행하라. 실패 시 deterministic하고 스킬 내부 결함일 때만 패치 1회와 재시험 1회를 허용한다.
+
+다음의 line count와 SHA-256을 전후 비교하라:
+- router registry
+- legacy registry
+- capabilities.json
+
+live registry에는 쓰지 마라. call_worker.sh와 backends.json의 diff가 계속 비어 있는지 확인하라.
+
+4) N=1 POLICY
+실제 레코드를 추가하지 마라. 현재 n=1이 anecdotal이며 heuristic override 불가임을 기존 unit test 또는 temp/read-only query로 확인하라.
+
+V2/V3 실사용 10건 이상 축적은 구현 미완료가 아니라 운영 마일스톤으로 분류하고:
+DEFERRED_OPERATIONAL
+로 표시하라. 테스트나 복제 레코드로 표본을 채우지 마라.
+
+5) LEGACY ROLLBACK
+runtime 재활성화 테스트는 하지 마라. 다음 정적 readiness만 검증하라:
+- legacy skill 파일 존재
+- disable-model-invocation:true
+- legacy registry readable 및 변경 없음
+- 새 router가 legacy evidence를 읽는 테스트 존재·통과
+- 정확한 rollback 절차 문서화
+
+rollback 절차는 최소한:
+새 router 자동호출 비활성
+→ legacy advisor 자동호출 재활성
+→ 별도 승인 후 smoke test
+→ 문제 시 즉시 원복
+을 포함하되, 실제 frontmatter 변경·symlink 변경·API smoke는 수행하지 마라.
+
+6) PUSH DECISION PACKET
+origin 최신 상태, 현재 branch refspec, b6da5ee에 포함된 파일과 줄, unrelated 변경 포함 위험, force 필요 여부, 일반 push 명령을 제시하라.
+
+다음 중 정확히 하나를 추천하라:
+- PUSH_CURRENT_BRANCH
+- HOLD_AND_REVIEW
+- CLEAN_BRANCH_RECONSTRUCTION_NEEDED
+
+마지막에만 AskUserQuestion으로 push 승인을 요청하라. 승인 전 push·merge 금지. 승인되면 일반 non-force push 최대 1회만 수행한다. 거부 또는 무응답이면 push 없이 goal을 완료한다.
+
+이터레이션 캡:
+- trigger용 claude -p 호출: 0회
+- test: 최대 2회(초기 1회 + 수정 후 1회)
+- skill patch: 최대 1회
+- fetch: 최대 1회
+- local commit: 최대 1회, 실제 스킬 파일 수정이 필요할 때만
+- b6da5ee amend: 금지
+- push: 명시 승인 후 최대 1회
+- merge: 0회
+- subagent: depth 1, 동시 3, 총 6
+
+cap 도달 시 더 반복하지 말고 PARTIAL 또는 BLOCKED로 보고하라.
+
+채점표 100점:
+- baseline 및 b6da5ee diff 분류: 20
+- A0 evidence closure: 20
+- tests 및 data integrity: 20
+- n=1 override 정책 검증: 15
+- static rollback readiness: 10
+- push decision packet: 15
+
+100점이면 READY_FOR_HUMAN_PUSH_DECISION이다. 검증 불가 항목을 추정하지 말고 EVIDENCE_INSUFFICIENT와 0점으로 처리한다. push 자체는 점수 조건이 아니다.
+
+최종 보고 형식:
+1. outcome
+2. 점수표
+3. 실행한 명령과 핵심 증거
+4. A0 재검산 결과와 evidence source
+5. unittest 결과
+6. hashes와 line counts before/after
+7. b6da5ee 경로별 분류
+8. working-tree 미관련 변경 보존 확인
+9. n=1 상태와 운영 마일스톤
+10. legacy rollback readiness 및 미실행 항목
+11. 변경 파일과 신규 local commit
+12. 제외한 작업과 제외 이유
+13. push 추천, 정확한 non-force 명령, 위험 요약
+14. 사람 승인 질문
+
+실행하지 않은 작업을 완료했다고 말하지 마라. trigger 실험을 추가 실행하지 마라. 미관련 변경을 stage하거나 commit하지 마라.

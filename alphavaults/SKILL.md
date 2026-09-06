@@ -1,0 +1,328 @@
+---
+name: alphavaults
+description: Turn any folder into a searchable knowledge base with a graph, wiki, and BM25 index. Three layers — Search (zero tokens) + Graph (relationships) + Wiki (context).
+trigger: /alphavaults
+---
+
+# /alphavaults
+
+Turn any folder into a searchable knowledge base with a graph, wiki, and BM25 index.
+Three layers: Search (zero tokens) -> Graph (relationships) -> Wiki (context).
+
+## Usage
+
+```
+/alphavaults                             # full pipeline on current directory
+/alphavaults <path>                      # full pipeline on specific path
+/alphavaults query "<question>"          # 3-layer unified query
+/alphavaults query "<question>" --dfs    # trace a specific chain (DFS depth 4)
+/alphavaults ingest <path>               # add new files, incremental update
+/alphavaults lint                        # check wiki + graph consistency
+/alphavaults status                      # show current state
+/alphavaults watch                       # auto-update on file changes
+/alphavaults install                     # register skill + install git hook
+```
+
+## What AlphaVaults does
+
+AlphaVaults converts a codebase into a persistent, queryable knowledge base in three layers. The Search layer uses BM25 (pure Python, zero external API calls, zero tokens) to find relevant wiki pages. The Graph layer uses tree-sitter AST extraction and NetworkX to map every function, class, and module into a directed graph with community detection. The Wiki layer auto-generates one markdown page per community, with cross-links, so you get human-readable context without reading source files.
+
+Three things it does that raw file reading cannot:
+
+1. **Token savings** -- a query costs ~900 tokens of context vs 60,000+ tokens to read the raw files. 60x savings per query.
+2. **Session continuity** -- the wiki accumulates Why/How knowledge. New sessions don't need re-explanation. The graph and wiki persist in `alphavaults-out/`.
+3. **Fully automatic** -- git hook + Codex hook keep the knowledge base current on every commit or file edit.
+
+## What You Must Do When Invoked
+
+### Step 0 -- Respect an existing vault's scope, and back it up
+
+**Do this before any other step whenever `alphavaults-out/` already exists.** Skipping it
+destroyed a vault on 2026-08-27: the vault had been built from a sub-path, the run was
+launched at the repo root with no path given, and 61,952 files replaced 683 -- wiki
+452 -> 9,982 pages, `graph.json` 4.4MB -> 372MB, the directory 8MB -> 794MB. The
+60x-token-saving property that justifies AlphaVaults does not survive that.
+
+```bash
+if [ -d alphavaults-out ]; then
+    echo "--- scope this vault was built from ---"
+    grep -m1 '^Source:' alphavaults-out/GRAPH_REPORT.md 2>/dev/null || echo "(GRAPH_REPORT.md absent)"
+    echo "--- current size (compare after) ---"
+    du -sh alphavaults-out
+    ls alphavaults-out/wiki/*.md 2>/dev/null | wc -l
+fi
+```
+
+- **The recorded `Source:` wins over `.`** If `GRAPH_REPORT.md` names a scope, use that path.
+  Rebuilding a sub-path vault at the repo root is a destructive scope change, not an update.
+- **Predict the size before running.** `detect()` counts what would be ingested without
+  writing anything. If the count is far above what `GRAPH_REPORT.md` records, stop and ask.
+  ```bash
+  $(cat alphavaults-out/.alphavaults_python) -c "
+  from alphavaults.detect import detect; from pathlib import Path
+  f = detect(Path('SCOPE'))['files']
+  print({k: len(v) for k, v in f.items()}, 'total', sum(len(v) for v in f.values()))"
+  ```
+- **Preserve what is not regenerable** before any rebuild -- `sources/` and `GRAPH_REPORT.md`
+  are authored/first-run records, not derived output:
+  ```bash
+  cp -R alphavaults-out/sources alphavaults-out/GRAPH_REPORT.md "$SCRATCH/alphavaults-preserve/"
+  ```
+- **`alphavaults-out` is in `SKIP_DIRS`.** Anything written under it -- including
+  `sources/*.md` -- is NOT indexed. Do not file a note there and report it as searchable.
+
+### Step 0b -- Never trust the exit code of a pipeline run
+
+`run()` / `run_incremental()` can print a traceback and still leave the shell reporting
+exit 0 (a trailing `| tail` swallows the status). Measured 2026-08-27:
+`OSError: [Errno 63] File name too long` at `alphavaults/wiki.py` -- one 364-char markdown
+heading produced a 346-char wiki filename and killed wiki generation for the whole vault.
+Always `grep -c "Traceback\|Error"` the output, and confirm the intended content actually
+landed in `search_index.json` rather than reading `doc_count` alone.
+
+If no path was given and no existing vault names a scope, use `.` (current directory).
+Do not ask the user for a path in that case.
+
+Follow these steps in order. Do not skip steps.
+
+### Step 1 -- Ensure alphavaults is installed
+
+```bash
+ALPHAVAULTS_BIN=$(which alphavaults 2>/dev/null)
+if [ -n "$ALPHAVAULTS_BIN" ]; then
+    PYTHON=$(head -1 "$ALPHAVAULTS_BIN" | tr -d '#!')
+    case "$PYTHON" in
+        *[!a-zA-Z0-9/_.-]*) PYTHON="python3" ;;
+    esac
+else
+    PYTHON="python3"
+fi
+"$PYTHON" -c "import alphavaults" 2>/dev/null || "$PYTHON" -m pip install alphavaults-ai -q 2>/dev/null || "$PYTHON" -m pip install alphavaults-ai -q --break-system-packages 2>&1 | tail -3
+mkdir -p alphavaults-out
+"$PYTHON" -c "import sys; open('alphavaults-out/.alphavaults_python', 'w').write(sys.executable)"
+```
+
+If the import succeeds, print nothing and move to Step 2.
+
+**In every subsequent bash block, replace `python3` with `$(cat alphavaults-out/.alphavaults_python)` to use the correct interpreter.**
+
+### Step 2 -- Run the full pipeline
+
+```bash
+$(cat alphavaults-out/.alphavaults_python) -c "
+from alphavaults.pipeline import run
+from pathlib import Path
+result = run(Path('INPUT_PATH'), Path('alphavaults-out'))
+print(f'Graph: {result[\"nodes\"]} nodes, {result[\"edges\"]} edges, {result[\"communities\"]} communities')
+print(f'Wiki: {result[\"wiki_pages\"]} pages, Index: {result[\"index_docs\"]} docs')
+print(f'Source: {result[\"total_words\"]} words')
+"
+```
+
+Replace `INPUT_PATH` with the actual path the user provided (or `.` if none).
+
+### Step 3 -- Read the report and present findings
+
+```bash
+$(cat alphavaults-out/.alphavaults_python) -c "
+import json
+from pathlib import Path
+from alphavaults.analyze import god_nodes, surprising_connections, suggest_questions
+from alphavaults.build import build_graph
+from alphavaults.cluster import cluster
+from alphavaults.wiki import _community_label
+
+graph_data = json.loads(Path('alphavaults-out/graph.json').read_text())
+import networkx as nx
+G = nx.node_link_graph(graph_data, edges='links')
+communities_data = graph_data.get('communities', {})
+communities = {int(k): v for k, v in communities_data.items()}
+labels = {}
+for cid, members in communities.items():
+    labels[cid] = _community_label(G, members)
+gods = god_nodes(G)
+surprises = surprising_connections(G, communities)
+questions = suggest_questions(G, communities, labels)
+
+print('=== God Nodes (highest connectivity) ===')
+for g in gods[:5]:
+    print(f'  {g[\"label\"]} ({g[\"edges\"]} connections)')
+
+print()
+print('=== Surprising Connections ===')
+for s in surprises[:5]:
+    src = G.nodes[s['source']].get('label', s['source']) if s['source'] in G else s['source']
+    tgt = G.nodes[s['target']].get('label', s['target']) if s['target'] in G else s['target']
+    print(f'  {src} -> {s.get(\"relation\",\"?\")} -> {tgt}')
+
+print()
+print('=== Suggested Questions ===')
+for i, q in enumerate(questions[:5], 1):
+    print(f'  {i}. {q}')
+"
+```
+
+Present the output to the user. If there are suggested questions, pick the most interesting one and offer to run it: "Want me to explore: {question}?"
+
+### Step 4 -- Open the interactive graph (optional)
+
+If the user wants to see the graph visually:
+
+```bash
+open alphavaults-out/graph.html
+```
+
+## For /alphavaults query
+
+Run the 3-layer query pipeline. Searches wiki (BM25, 0 tokens), traverses graph (BFS or DFS), then reads wiki pages up to the token budget.
+
+```bash
+$(cat alphavaults-out/.alphavaults_python) -c "
+from alphavaults.query import query
+from pathlib import Path
+import json
+
+result = query('QUESTION', Path('alphavaults-out'), mode='MODE', budget=2000)
+
+print('=== Search Results (0 tokens) ===')
+for sr in result['search_results']:
+    print(f'  [{sr[\"title\"]}] score={sr[\"score\"]:.2f}')
+    print(f'    {sr[\"snippet\"][:100]}')
+
+gc = result['graph_context']
+print(f'\\n=== Graph Context ===')
+print(f'  Matched nodes: {len(gc[\"matched_nodes\"])}')
+for edge in gc['edges'][:5]:
+    print(f'  {edge.get(\"source\",\"?\")} --{edge.get(\"relation\",\"->\")}--> {edge.get(\"target\",\"?\")}')
+
+print(f'\\n=== Wiki Context (est. ~{result[\"tokens_used\"]} tokens) ===')
+wiki = result['wiki_context']
+if wiki:
+    print(wiki[:800])
+    if len(wiki) > 800:
+        print(f'... ({len(wiki)-800} more chars)')
+else:
+    print('  (no wiki context)')
+
+print(f'\\nTotal tokens: {result[\"tokens_used\"]}')
+"
+```
+
+Replace `QUESTION` with the user's question. Replace `MODE` with `bfs` (default) or `dfs` (if `--dfs` flag used).
+
+Present the wiki context to the user as the answer. If tokens_used is very low and wiki_context is empty, suggest running the full pipeline first.
+
+## For /alphavaults lint
+
+Check wiki and graph consistency.
+
+```bash
+$(cat alphavaults-out/.alphavaults_python) -c "
+from alphavaults.lint import lint_wiki, lint_graph
+from pathlib import Path
+
+wiki_result = lint_wiki(Path('alphavaults-out/wiki'), Path('alphavaults-out/graph.json'))
+graph_result = lint_graph(Path('alphavaults-out/graph.json'))
+
+print('=== Wiki Lint ===')
+print(f'  Pages: {wiki_result[\"total_pages\"]}')
+print(f'  Broken links: {len(wiki_result[\"broken_links\"])}')
+for bl in wiki_result['broken_links'][:5]:
+    print(f'    {bl[\"file\"]}: [[{bl[\"link\"]}]]')
+print(f'  Orphan pages: {len(wiki_result[\"orphan_pages\"])}')
+
+print('\\n=== Graph Lint ===')
+print(f'  Nodes: {graph_result[\"total_nodes\"]}')
+print(f'  Edges: {graph_result[\"total_edges\"]}')
+print(f'  Isolated: {len(graph_result[\"isolated_nodes\"])}')
+print(f'  Ambiguous edges: {graph_result[\"ambiguous_edges\"]}')
+
+total_issues = len(wiki_result['broken_links']) + len(wiki_result['orphan_pages']) + len(graph_result['isolated_nodes']) + graph_result['ambiguous_edges']
+if total_issues == 0:
+    print('\\nAll clear.')
+else:
+    print(f'\\n{total_issues} issues found.')
+"
+```
+
+Report the results. Broken wikilinks to node-level slugs (not community pages) are expected and not actionable.
+
+## For /alphavaults status
+
+Show the current state of the knowledge base.
+
+```bash
+$(cat alphavaults-out/.alphavaults_python) -c "
+import json, os
+from pathlib import Path
+from datetime import datetime
+
+out = Path('alphavaults-out')
+if not out.exists():
+    print('No AlphaVaults data found. Run /alphavaults . first.')
+    exit(1)
+
+gp = out / 'graph.json'
+if gp.exists():
+    data = json.loads(gp.read_text())
+    nodes = len(data.get('nodes', []))
+    edges = len(data.get('links', []))
+    comms = len(data.get('communities', {}))
+    mtime = datetime.fromtimestamp(os.path.getmtime(gp)).strftime('%Y-%m-%d %H:%M:%S')
+    print(f'Graph: {nodes} nodes, {edges} edges, {comms} communities')
+    print(f'Last updated: {mtime}')
+
+wp = out / 'wiki'
+if wp.exists():
+    pages = len(list(wp.glob('*.md')))
+    print(f'Wiki: {pages} pages')
+
+ip = out / 'search_index.json'
+if ip.exists():
+    idx = json.loads(ip.read_text())
+    print(f'Search index: {idx.get(\"doc_count\", 0)} documents')
+"
+```
+
+## For /alphavaults ingest
+
+Add new files via incremental update. Only re-processes changed files.
+
+```bash
+$(cat alphavaults-out/.alphavaults_python) -c "
+from alphavaults.pipeline import run_incremental
+from pathlib import Path
+
+result = run_incremental(Path('INPUT_PATH'), Path('alphavaults-out'))
+if result.get('changed', 0) == 0:
+    print('No changes detected.')
+else:
+    print(f'Updated: {result.get(\"changed\",0)} files')
+    print(f'Graph: {result[\"nodes\"]} nodes, {result[\"edges\"]} edges, {result[\"communities\"]} communities')
+    print(f'Wiki: {result[\"wiki_pages\"]} pages, Index: {result[\"index_docs\"]} docs')
+"
+```
+
+Replace `INPUT_PATH` with the path the user provided. If no output exists yet, `run_incremental` automatically falls back to a full pipeline run.
+
+## For /alphavaults install
+
+Register the skill and install git hooks.
+
+```bash
+alphavaults install
+```
+
+This copies SKILL.md to `~/.Codex/skills/alphavaults/`, registers in `~/.Codex/AGENTS.md`, and installs a git post-commit hook.
+
+## Outputs
+
+```
+alphavaults-out/
+  graph.json          -- raw graph data (nodes, links, communities)
+  graph.html          -- interactive vis.js visualization
+  GRAPH_REPORT.md     -- audit report (god nodes, communities, surprises)
+  wiki/INDEX.md       -- wiki entry point with community listing
+  wiki/*.md           -- one page per community
+  search_index.json   -- BM25 inverted index
+```
