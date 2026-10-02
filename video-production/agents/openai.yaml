@@ -1,0 +1,4 @@
+interface:
+  display_name: "영상 제작 도우미"
+  short_description: "영상 프로젝트의 단계 관리와 블록아웃·측정 준비를 자연어로 진행"
+  default_prompt: "$video-production 현재 영상 프로젝트의 진행 상태를 확인하고, 요청한 다음 로컬 작업을 진행해 줘."
