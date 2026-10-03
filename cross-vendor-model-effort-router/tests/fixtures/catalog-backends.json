@@ -1,0 +1,757 @@
+{
+  "schema_version": "2",
+  "flavor": "claude-conductor",
+  "multiagent_root_env": "MULTIAGENT_ROOT",
+  "receipt_contract": "dispatcher-envelope-v2",
+  "trusted_executable_paths": {
+    "claude-main": "/opt/homebrew/bin/claude",
+    "agy-compat": "/Users/test-user/.local/bin/agy",
+    "grok-adversarial": "/Users/test-user/.grok/bin/grok",
+    "codex-main": "/Users/test-user/.local/bin/codex",
+    "codex-critic": "/Users/test-user/.local/bin/codex",
+    "codex-recompute": "/Users/test-user/.local/bin/codex",
+    "gemini": "/Users/test-user/.local/bin/agy"
+  },
+  "workers": {
+    "claude-main": {
+      "model": "claude-opus-5-5",
+      "expected_model_usage_keys": [
+        "claude-opus-5-5",
+        "claude-opus-5-5[1m]"
+      ],
+      "effort": "max",
+      "call_type": "cli",
+      "brief_mode": "stdin",
+      "cli": {
+        "command": "/opt/homebrew/bin/claude",
+        "version_args": [
+          "--version"
+        ],
+        "help_args": [
+          "--help"
+        ],
+        "required_help_tokens": [
+          "--safe-mode",
+          "--no-chrome",
+          "--strict-mcp-config",
+          "--mcp-config",
+          "--disable-slash-commands",
+          "--effort",
+          "--output-format",
+          "--permission-mode",
+          "--allowedTools",
+          "--disallowedTools",
+          "--prompt-suggestions",
+          "--no-session-persistence"
+        ],
+        "args_template": [
+          "-p",
+          "--safe-mode",
+          "--no-chrome",
+          "--strict-mcp-config",
+          "--mcp-config",
+          "{\"mcpServers\":{}}",
+          "--disable-slash-commands",
+          "--model",
+          "claude-opus-5-5",
+          "--effort",
+          "max",
+          "--output-format",
+          "json",
+          "--permission-mode",
+          "dontAsk",
+          "--tools",
+          "Read,Glob,Grep",
+          "--allowedTools",
+          "Read,Glob,Grep",
+          "--disallowedTools",
+          "Bash,Edit,Write,NotebookEdit,Agent,AskUserQuestion,WebFetch,WebSearch,Skill",
+          "--prompt-suggestions",
+          "false",
+          "--no-session-persistence"
+        ]
+      },
+      "expected_version_regex": "Claude Code|^2\\.",
+      "expected_executable_sha256": "d8cb1e5c79684cc12a8bfc813e3a2073406921b6245744b3009be3ab5651d21e",
+      "cwd_policy": "repo_readonly_clone",
+      "write_policy": "none",
+      "require_os_write_confinement": true,
+      "state_write_policy": {
+        "home_relative_directory_subpaths": [],
+        "home_relative_file_literals": []
+      },
+      "read_policy": "system-snapshot-role-provider-root-only-v1",
+      "provider_auth_trust_boundary": true,
+      "require_independent_verification": true,
+      "operation_proof_eligible": true,
+      "proof_scope": "DISPATCHER_ROUTE_EXECUTION_AND_RESPONSE_CONTRACT",
+      "model_evidence_scope": "PINNED_CLI_RESPONSE_MODEL_USAGE_METADATA",
+      "permission_profile": "safe-mode:no-chrome:empty-mcp:dontAsk:explicitly-allowed-read-tools:no-session-persistence",
+      "approval_class": "worker",
+      "result_capture": "dispatcher-envelope-v2",
+      "trusted_writer_profile": {
+        "enabled": true,
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "permission_class": "FEATURE_BRANCH_OWNER",
+        "gateway_commit": true,
+        "provider_git_write": false,
+        "provider_control_plane_egress": true,
+        "model_command_egress_enforced": false,
+        "args_template": [
+          "-p",
+          "--safe-mode",
+          "--no-chrome",
+          "--strict-mcp-config",
+          "--mcp-config",
+          "{\"mcpServers\":{}}",
+          "--disable-slash-commands",
+          "--model",
+          "claude-opus-5-5",
+          "--effort",
+          "max",
+          "--output-format",
+          "json",
+          "--permission-mode",
+          "dontAsk",
+          "--tools",
+          "Read,Glob,Grep,Edit,Write",
+          "--allowedTools",
+          "Read,Glob,Grep,Edit,Write",
+          "--disallowedTools",
+          "Bash,NotebookEdit,Agent,AskUserQuestion,WebFetch,WebSearch,Skill",
+          "--prompt-suggestions",
+          "false",
+          "--no-session-persistence",
+          "@brief_stdin"
+        ],
+        "timeout": 900
+      },
+      "timeout": 900,
+      "executable_pin_policy": "record_and_notify",
+      "dynamic_loadout": {
+        "allowed_models": [
+          "claude-opus-5-5"
+        ],
+        "allowed_efforts": [
+          "max"
+        ],
+        "default_model": "claude-opus-5-5",
+        "fallback_effort": "max",
+        "selector": "provider-catalog-v1",
+        "catalog_provider": "claude",
+        "catalog_resolver_path": "/Users/test-user/.agents/skills/cross-vendor-model-effort-router/provider_catalog.py",
+        "catalog_resolver_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_resolver_dependencies": {
+          "codex_inventory.py": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "agy-compat": {
+      "model": "gemini-3.7-flash-high",
+      "effort": "model-high",
+      "call_type": "cli",
+      "brief_mode": "content",
+      "cli": {
+        "command": "/Users/test-user/.local/bin/agy",
+        "version_args": [
+          "--version"
+        ],
+        "help_args": [
+          "--help"
+        ],
+        "required_help_tokens": [
+          "--prompt",
+          "--model",
+          "--mode",
+          "--sandbox",
+          "--dangerously-skip-permissions",
+          "--add-dir"
+        ],
+        "args_template": [
+          "--model",
+          "Gemini 3.7 Flash (High)",
+          "--mode",
+          "plan",
+          "--sandbox",
+          "--dangerously-skip-permissions",
+          "--print-timeout",
+          "10m",
+          "--prompt",
+          "@brief_content",
+          "--add-dir",
+          "@worker_snapshot",
+          "--add-dir",
+          "@repo_readonly_clone"
+        ]
+      },
+      "requested_model_cli": "Gemini 3.7 Flash (High)",
+      "expected_version_regex": "^1\\.",
+      "expected_executable_sha256": "d583be1344ea9cfa0c45cff2c1342af7837f4833c4edb65e69bee84776a45caa",
+      "cwd_policy": "repo_readonly_clone",
+      "write_policy": "none",
+      "require_os_write_confinement": true,
+      "state_write_policy": {
+        "home_relative_directory_subpaths": [
+          ".gemini/antigravity-cli/log",
+          ".gemini/antigravity-cli/crashes",
+          ".gemini/antigravity-cli/cache",
+          ".gemini/antigravity-cli/conversations",
+          ".gemini/antigravity-cli/brain"
+        ],
+        "home_relative_file_literals": [
+          ".gemini/antigravity-cli/last_check.timestamp",
+          ".gemini/antigravity-cli/conversation_summaries.db",
+          ".gemini/antigravity-cli/conversation_summaries.db-wal",
+          ".gemini/antigravity-cli/conversation_summaries.db-shm"
+        ]
+      },
+      "read_policy": "system-snapshot-role-provider-root-only-v1",
+      "provider_auth_trust_boundary": true,
+      "require_independent_verification": true,
+      "operation_proof_eligible": true,
+      "proof_scope": "DISPATCHER_ROUTE_EXECUTION_AND_RESPONSE_CONTRACT",
+      "model_evidence_scope": "CLI_BOUND_TEXT_CLAIM",
+      "permission_profile": "plan:sandbox:auto-approve-user-authorized",
+      "required_owner_action_class": "agy-compat headless tool auto-approval with macOS sandbox, write_policy none, isolated snapshot and post-run immutability verification retained",
+      "approval_class": "worker",
+      "result_capture": "dispatcher-envelope-v2",
+      "trusted_writer_profile": {
+        "enabled": true,
+        "model": "gemini-3.7-flash-high",
+        "effort": "model-high",
+        "permission_class": "FEATURE_BRANCH_OWNER",
+        "gateway_commit": true,
+        "provider_git_write": false,
+        "provider_control_plane_egress": true,
+        "model_command_egress_enforced": false,
+        "args_template": [
+          "--model",
+          "Gemini 3.7 Flash (High)",
+          "--mode",
+          "accept-edits",
+          "--sandbox",
+          "--dangerously-skip-permissions",
+          "--print-timeout",
+          "10m",
+          "--prompt",
+          "@brief_content"
+        ],
+        "timeout": 900
+      },
+      "timeout": 900,
+      "executable_pin_policy": "record_and_notify",
+      "dynamic_loadout": {
+        "allowed_models": [
+          "gemini-3.7-flash-high"
+        ],
+        "allowed_efforts": [
+          "model-high"
+        ],
+        "default_model": "gemini-3.7-flash-high",
+        "fallback_effort": "model-high",
+        "selector": "provider-catalog-v1",
+        "catalog_provider": "agy",
+        "catalog_resolver_path": "/Users/test-user/.agents/skills/cross-vendor-model-effort-router/provider_catalog.py",
+        "catalog_resolver_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_resolver_dependencies": {
+          "codex_inventory.py": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "grok-adversarial": {
+      "model": "grok-4.6",
+      "effort": "high",
+      "call_type": "cli",
+      "brief_mode": "content",
+      "cli": {
+        "command": "/Users/test-user/.grok/bin/grok",
+        "version_args": [
+          "--version"
+        ],
+        "help_args": [
+          "--help"
+        ],
+        "required_help_tokens": [
+          "--prompt-file",
+          "--model",
+          "--effort",
+          "--output-format",
+          "--permission-mode",
+          "--no-subagents",
+          "--max-turns"
+        ],
+        "args_template": [
+          "--prompt-file",
+          "@brief",
+          "--model",
+          "grok-4.6",
+          "--effort",
+          "high",
+          "--output-format",
+          "json",
+          "--permission-mode",
+          "plan",
+          "--tools",
+          "Read,Glob,Grep",
+          "--disallowed-tools",
+          "Bash,Edit,Write,NotebookEdit",
+          "--no-subagents",
+          "--no-memory",
+          "--disable-web-search",
+          "--max-turns",
+          "40",
+          "--no-auto-update",
+          "--verbatim"
+        ]
+      },
+      "expected_version_regex": "^grok 1\\.0\\.",
+      "expected_executable_sha256": "9c844eb13365180787d9ad22b2b3748a024be8e1ed845253cc114781b31c591d",
+      "cwd_policy": "repo_readonly_clone",
+      "write_policy": "none",
+      "require_os_write_confinement": true,
+      "state_write_policy": {
+        "home_relative_directory_subpaths": [
+          ".grok/sessions",
+          ".grok/logs",
+          ".grok/upload_queue"
+        ],
+        "home_relative_file_literals": [
+          ".grok/models_cache.json",
+          ".grok/active_sessions.json"
+        ]
+      },
+      "read_policy": "system-snapshot-role-provider-root-only-v1",
+      "provider_auth_trust_boundary": true,
+      "require_independent_verification": true,
+      "operation_proof_eligible": true,
+      "proof_scope": "DISPATCHER_ROUTE_EXECUTION_AND_RESPONSE_CONTRACT",
+      "model_evidence_scope": "CLI_BOUND_TEXT_CLAIM",
+      "permission_profile": "plan:read-only-tools:no-subagents:no-memory:no-web",
+      "approval_class": "worker",
+      "result_capture": "dispatcher-envelope-v2",
+      "trusted_writer_profile": {
+        "schema_version": "writer-profile.v1",
+        "enabled": true,
+        "worker": "grok-adversarial",
+        "model": "grok-4.6",
+        "effort": "high",
+        "default_mode": "read_only",
+        "permission_class": "FEATURE_BRANCH_OWNER",
+        "write_root_policy": "assignment_target_worktree_realpath",
+        "allowed_ops": [
+          "create",
+          "update",
+          "delete_within_worktree"
+        ],
+        "denied": [
+          "parent_or_sibling_write",
+          "symlink_or_mount_escape",
+          "unresolved_absolute_write",
+          "secret_source_read",
+          "unbounded_child_process"
+        ],
+        "runtime": {
+          "stdin": "brief_prompt_file",
+          "tty": "detached",
+          "timeout_ms": 900000,
+          "single_writer_lease": true
+        },
+        "on_any_failure": "read_only_fallback",
+        "gateway_commit": true,
+        "provider_git_write": false,
+        "provider_control_plane_egress": true,
+        "model_command_egress_enforced": false,
+        "args_template": [
+          "--prompt-file",
+          "@brief_file",
+          "--model",
+          "grok-4.6",
+          "--effort",
+          "high",
+          "--output-format",
+          "json",
+          "--permission-mode",
+          "bypassPermissions",
+          "--always-approve",
+          "--tools",
+          "Read,Glob,Grep,Edit,Write",
+          "--disallowed-tools",
+          "Bash,NotebookEdit",
+          "--no-subagents",
+          "--no-memory",
+          "--disable-web-search",
+          "--max-turns",
+          "80",
+          "--no-auto-update",
+          "--verbatim"
+        ],
+        "timeout": 900
+      },
+      "timeout": 900,
+      "executable_pin_policy": "record_and_notify",
+      "dynamic_loadout": {
+        "allowed_models": [
+          "grok-4.6"
+        ],
+        "allowed_efforts": [
+          "high"
+        ],
+        "default_model": "grok-4.6",
+        "fallback_effort": "high",
+        "selector": "provider-catalog-v1",
+        "catalog_provider": "grok",
+        "catalog_resolver_path": "/Users/test-user/.agents/skills/cross-vendor-model-effort-router/provider_catalog.py",
+        "catalog_resolver_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_resolver_dependencies": {
+          "codex_inventory.py": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "codex-main": {
+      "model": "gpt-6-astra",
+      "effort": "config",
+      "call_type": "cli",
+      "brief_mode": "stdin",
+      "cli": {
+        "command": "/Users/test-user/.local/bin/codex",
+        "version_args": [
+          "--version"
+        ],
+        "args_template": [
+          "exec",
+          "--ephemeral",
+          "--json",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "--model",
+          "gpt-6-astra",
+          "-"
+        ],
+        "help_args": [
+          "exec",
+          "--help"
+        ],
+        "required_help_tokens": [
+          "--ephemeral",
+          "--json",
+          "--sandbox",
+          "--model",
+          "--config"
+        ]
+      },
+      "expected_version_regex": "codex-cli 0\\.",
+      "expected_executable_sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704",
+      "cwd_policy": "target",
+      "write_policy": "none",
+      "operation_proof_eligible": false,
+      "proof_scope": "REGISTERED_ROUTE_ONLY_NONCOUNTABLE",
+      "model_evidence_scope": "NONE",
+      "permission_profile": "seatbelt-confined:no-inner-sandbox:ephemeral",
+      "approval_class": "worker",
+      "result_capture": "dispatcher-envelope-v2",
+      "trusted_writer_profile": {
+        "schema_version": "writer-profile.v1",
+        "enabled": true,
+        "worker": "codex-main",
+        "default_mode": "read_only",
+        "permission_class": "FEATURE_BRANCH_OWNER",
+        "write_root_policy": "assignment_target_worktree_realpath",
+        "allowed_ops": [
+          "create",
+          "update",
+          "delete_within_worktree"
+        ],
+        "denied": [
+          "parent_or_sibling_write",
+          "symlink_or_mount_escape",
+          "unresolved_absolute_write",
+          "secret_source_read",
+          "unbounded_child_process"
+        ],
+        "runtime": {
+          "stdin": "brief_stdin_then_eof",
+          "tty": "detached",
+          "timeout_ms": 900000,
+          "single_writer_lease": true
+        },
+        "on_any_failure": "read_only_fallback",
+        "gateway_commit": true,
+        "provider_git_write": false,
+        "provider_control_plane_egress": true,
+        "model_command_egress_enforced": true,
+        "args_template": [
+          "exec",
+          "--ephemeral",
+          "--ignore-user-config",
+          "--ignore-rules",
+          "--json",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "--color",
+          "never",
+          "--model",
+          "gpt-6-astra",
+          "@brief_stdin"
+        ],
+        "timeout": 900,
+        "egress_mode": "credential_less_proxy",
+        "egress_allowlist": [
+          "chatgpt.com",
+          "auth.openai.com"
+        ],
+        "egress_allowlist_provenance": {
+          "chatgpt.com": {
+            "status": "OBSERVED",
+            "reason": "reached through the proxy during the 2026-07-27 supervised dispatch; recorded in the allowed probe"
+          },
+          "auth.openai.com": {
+            "status": "DECLARED_UNOBSERVED",
+            "reason": "Owner decision (a) 2026-07-28. The CLI reaches this host only on the stale-token refresh path, measured in tasks/20260728-w3f1-host-census/ (axes A and C agree, scenario S2 only). The 2026-07-27 dispatch held a fresh token, so its silence about this host was not evidence that it is unneeded. Not marked OBSERVED because no dispatch has exercised the refresh path."
+          }
+        },
+        "model_command_egress_enforcement": {
+          "mechanism_id": "credential_less_egress_proxy+seatbelt_narrow_outbound",
+          "applied": true,
+          "allowed_probe_sha256": "458859835aaa611ab6f75d5a18f8caa2f5d1db0b065895154e1805133c9b65ac",
+          "denied_probe_sha256": "1f355e50ca008804544b001e89f13f62e368c9e4719758033bd3510a7b8c228c",
+          "probe_ledger_sha256": "a219e07f01dea87819e7762aef5c070524685bfd99b672ce843cee7b47d8f6a8"
+        }
+      },
+      "timeout": 900,
+      "require_os_write_confinement": true,
+      "state_write_policy": {
+        "home_relative_directory_subpaths": [],
+        "home_relative_file_literals": []
+      },
+      "executable_pin_policy": "record_and_notify",
+      "dynamic_loadout": {
+        "selector": "provider-catalog-v1",
+        "allowed_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "gpt-6-luna",
+          "gpt-6-sol",
+          "gpt-6-astra"
+        ],
+        "allowed_efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_model": "gpt-6-astra",
+        "effort_config_key": "model_reasoning_effort",
+        "fallback_effort": "config",
+        "catalog_provider": "codex",
+        "catalog_resolver_path": "/Users/test-user/.agents/skills/cross-vendor-model-effort-router/provider_catalog.py",
+        "catalog_resolver_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_resolver_dependencies": {
+          "codex_inventory.py": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "codex-critic": {
+      "model": "gpt-6-astra",
+      "effort": "config",
+      "call_type": "cli",
+      "brief_mode": "stdin",
+      "cli": {
+        "command": "/Users/test-user/.local/bin/codex",
+        "version_args": [
+          "--version"
+        ],
+        "args_template": [
+          "exec",
+          "--ephemeral",
+          "--json",
+          "-s",
+          "read-only",
+          "--model",
+          "gpt-6-astra",
+          "-"
+        ],
+        "help_args": [
+          "exec",
+          "--help"
+        ],
+        "required_help_tokens": [
+          "--ephemeral",
+          "--json",
+          "--sandbox",
+          "--model",
+          "--config"
+        ]
+      },
+      "expected_version_regex": "codex-cli 0\\.",
+      "expected_executable_sha256": "8eaf1ad12fe6bf89b1710330f58900014322c7c5af677e43be116d8ac5fc0a9e",
+      "cwd_policy": "target",
+      "write_policy": "none",
+      "operation_proof_eligible": false,
+      "proof_scope": "REGISTERED_ROUTE_ONLY_NONCOUNTABLE",
+      "model_evidence_scope": "NONE",
+      "permission_profile": "read-only:never:ephemeral",
+      "approval_class": "worker",
+      "result_capture": "dispatcher-envelope-v2",
+      "timeout": 900,
+      "executable_pin_policy": "record_and_notify",
+      "dynamic_loadout": {
+        "selector": "provider-catalog-v1",
+        "allowed_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "gpt-6-luna",
+          "gpt-6-sol",
+          "gpt-6-astra"
+        ],
+        "allowed_efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_model": "gpt-6-astra",
+        "effort_config_key": "model_reasoning_effort",
+        "fallback_effort": "config",
+        "catalog_provider": "codex",
+        "catalog_resolver_path": "/Users/test-user/.agents/skills/cross-vendor-model-effort-router/provider_catalog.py",
+        "catalog_resolver_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_resolver_dependencies": {
+          "codex_inventory.py": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "codex-recompute": {
+      "model": "gpt-6-astra",
+      "effort": "config",
+      "call_type": "cli",
+      "brief_mode": "stdin",
+      "cli": {
+        "command": "/Users/test-user/.local/bin/codex",
+        "version_args": [
+          "--version"
+        ],
+        "args_template": [
+          "exec",
+          "--ephemeral",
+          "--json",
+          "--skip-git-repo-check",
+          "-s",
+          "read-only",
+          "--model",
+          "gpt-6-astra",
+          "-"
+        ],
+        "help_args": [
+          "exec",
+          "--help"
+        ],
+        "required_help_tokens": [
+          "--ephemeral",
+          "--json",
+          "--sandbox",
+          "--model",
+          "--config"
+        ]
+      },
+      "expected_version_regex": "codex-cli 0\\.",
+      "expected_executable_sha256": "8eaf1ad12fe6bf89b1710330f58900014322c7c5af677e43be116d8ac5fc0a9e",
+      "cwd_policy": "target",
+      "write_policy": "none",
+      "operation_proof_eligible": false,
+      "proof_scope": "REGISTERED_ROUTE_ONLY_NONCOUNTABLE",
+      "model_evidence_scope": "NONE",
+      "permission_profile": "read-only:approved-target-worktree:ephemeral",
+      "approval_class": "worker",
+      "result_capture": "dispatcher-envelope-v2",
+      "timeout": 900,
+      "executable_pin_policy": "record_and_notify",
+      "dynamic_loadout": {
+        "selector": "provider-catalog-v1",
+        "allowed_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "gpt-6-luna",
+          "gpt-6-sol",
+          "gpt-6-astra"
+        ],
+        "allowed_efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_model": "gpt-6-astra",
+        "effort_config_key": "model_reasoning_effort",
+        "fallback_effort": "config",
+        "catalog_provider": "codex",
+        "catalog_resolver_path": "/Users/test-user/.agents/skills/cross-vendor-model-effort-router/provider_catalog.py",
+        "catalog_resolver_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_resolver_dependencies": {
+          "codex_inventory.py": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "gemini": {
+      "alias_of": "agy-compat",
+      "model": "gemini-3.7-flash-high",
+      "effort": "model-high",
+      "call_type": "cli",
+      "brief_mode": "content",
+      "cli": {
+        "command": "/Users/test-user/.local/bin/agy",
+        "version_args": [
+          "--version"
+        ],
+        "help_args": [
+          "--help"
+        ],
+        "required_help_tokens": [
+          "--prompt",
+          "--model",
+          "--mode",
+          "--sandbox"
+        ],
+        "args_template": [
+          "--model",
+          "Gemini 3.7 Flash (High)",
+          "--mode",
+          "plan",
+          "--sandbox",
+          "--print-timeout",
+          "10m",
+          "--prompt",
+          "@brief_content"
+        ]
+      },
+      "requested_model_cli": "Gemini 3.7 Flash (High)",
+      "expected_version_regex": "^1\\.",
+      "expected_executable_sha256": "d583be1344ea9cfa0c45cff2c1342af7837f4833c4edb65e69bee84776a45caa",
+      "cwd_policy": "task",
+      "write_policy": "none",
+      "operation_proof_eligible": false,
+      "proof_scope": "REGISTERED_ROUTE_ONLY_NONCOUNTABLE",
+      "model_evidence_scope": "NONE",
+      "permission_profile": "plan:sandbox",
+      "approval_class": "worker",
+      "result_capture": "dispatcher-envelope-v2",
+      "timeout": 900,
+      "executable_pin_policy": "record_and_notify",
+      "dynamic_loadout": {
+        "allowed_models": [
+          "gemini-3.7-flash-high"
+        ],
+        "allowed_efforts": [
+          "model-high"
+        ],
+        "default_model": "gemini-3.7-flash-high",
+        "fallback_effort": "model-high",
+        "selector": "provider-catalog-v1",
+        "catalog_provider": "agy",
+        "catalog_resolver_path": "/Users/test-user/.agents/skills/cross-vendor-model-effort-router/provider_catalog.py",
+        "catalog_resolver_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "catalog_resolver_dependencies": {
+          "codex_inventory.py": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    }
+  }
+}

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Engine for cross-vendor-model-effort-router.
 
-Advisory only. Recommends DIRECT / PLAN_FIRST / DELEGATE, a worker (for delegation),
-or a session model+effort (for direct execution), and learns from operator-declared,
-verified outcomes. Standard library only.
+Recommends DIRECT / PLAN_FIRST / DELEGATE, emits an execution contract for direct
+Codex routes, and learns from operator-declared, verified outcomes. Standard library only.
 
 It NEVER writes to the legacy gpt-model-effort-advisor registry: that file is read
 read-only as legacy evidence. This skill owns its own registry.jsonl.
@@ -23,15 +22,16 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from codex_inventory import apply_inventory, MODEL_ID
 
 HERE = Path(__file__).resolve().parent
 REGISTRY = HERE / "registry.jsonl"
 CAPABILITIES = HERE / "capabilities.json"
 LEGACY_REGISTRY = Path.home() / ".agents/skills/gpt-model-effort-advisor/registry.jsonl"
 
-ROUTER_VERSION = "2.0.0"
+ROUTER_VERSION = "2.7.0"
 SCHEMA_VERSION = "v2"
-POLICY_VERSION = "2.0.0"
+POLICY_VERSION = "2.3.0"
 
 LEGACY_AXES = ("verifiable", "failcost", "volume", "depth")
 EXT_AXES = ("handoff_cost", "spec_readiness", "decomposability", "context_dependency",
@@ -103,6 +103,9 @@ def canonical_surface(surface):
 
 def model_family(model):
     model = (model or "").lower()
+    match = MODEL_ID.fullmatch(model)
+    if match:
+        return "gpt-" + match.group(1)
     if model.startswith("gpt-5.6-"):
         return "gpt-5.6"
     if "fable" in model:
@@ -125,6 +128,24 @@ def capability_freshness(caps, now=None):
         "age_days": age,
         "stale_after_days": limit,
     }
+
+
+def codex_model_availability(caps, model, now=None):
+    """Use a recent authenticated model/list snapshot; stale snapshots say unknown."""
+    snapshot = caps.get("_codex_account_inventory", {})
+    try:
+        captured = datetime.fromisoformat(str(snapshot["captured_at"])).replace(
+            tzinfo=timezone.utc)
+        age = ((now or datetime.now(timezone.utc)) - captured).total_seconds() / 86400
+    except (KeyError, TypeError, ValueError):
+        return "unknown"
+    if age < 0 or age > float(snapshot.get("stale_after_days", 1)):
+        return "unknown"
+    if model in snapshot.get("available_recommendation_models", []):
+        return "available"
+    if model in snapshot.get("official_but_not_exposed", []):
+        return "unavailable"
+    return "unknown"
 
 
 def infer_vendor(rec):
@@ -158,6 +179,9 @@ def _flag_value(args, flag):
 def _backend_semantic_projection(data):
     worker_fields = (
         "model", "effort", "call_type", "brief_mode", "requested_model_cli",
+        "dynamic_loadout",
+        "expected_model_usage_key",
+        "expected_model_usage_keys",
         "expected_executable_sha256", "expected_version_regex", "cwd_policy", "write_policy",
         "operation_proof_eligible", "proof_scope", "model_evidence_scope",
         "permission_profile", "result_capture", "read_policy",
@@ -176,6 +200,9 @@ def _backend_semantic_projection(data):
         row["cli"] = {
             "command": cli.get("command"),
             "args_template": cli.get("args_template"),
+            "version_args": cli.get("version_args"),
+            "help_args": cli.get("help_args"),
+            "required_help_tokens": cli.get("required_help_tokens"),
         }
         trusted = raw.get("trusted_writer_profile")
         row["trusted_writer_profile"] = (
@@ -198,6 +225,24 @@ def _validate_model_effort_binding(name, worker):
     declared_model = worker.get("model")
     cli_model = worker.get("requested_model_cli") or declared_model
     declared_effort = worker.get("effort")
+    dynamic = worker.get("dynamic_loadout")
+    if dynamic is not None:
+        if not isinstance(dynamic, dict) or dynamic.get("selector") not in ("router-v1", "provider-catalog-v1"):
+            raise BackendContractError(f"{name}: invalid dynamic_loadout selector")
+        models = dynamic.get("allowed_models")
+        efforts = dynamic.get("allowed_efforts")
+        if not isinstance(models, list) or not models or not all(
+                isinstance(value, str) and value for value in models):
+            raise BackendContractError(f"{name}: dynamic_loadout allowed_models invalid")
+        if not isinstance(efforts, list) or not efforts or not all(
+                value in (NORMAL_EFFORT_LADDER if dynamic.get("selector")=="router-v1" else ("none","minimal","low","medium","high","xhigh","max","ultra","config","model-high","auto")) for value in efforts):
+            raise BackendContractError(f"{name}: dynamic_loadout allowed_efforts invalid")
+        if len(models) != len(set(models)) or len(efforts) != len(set(efforts)):
+            raise BackendContractError(f"{name}: dynamic_loadout allowlists contain duplicates")
+        if dynamic.get("default_model") != declared_model:
+            raise BackendContractError(f"{name}: dynamic_loadout default_model mismatch")
+        if dynamic.get("fallback_effort") != declared_effort:
+            raise BackendContractError(f"{name}: dynamic_loadout fallback_effort mismatch")
     arg_model = _flag_value(args, "--model")
     arg_effort = _flag_value(args, "--effort")
     if arg_model is not None and arg_model != cli_model:
@@ -213,15 +258,19 @@ def _validate_model_effort_binding(name, worker):
     targs = trusted.get("args_template") or []
     tmodel = _flag_value(targs, "--model")
     teffort = _flag_value(targs, "--effort")
+    # Writer profiles may omit model/effort to inherit the worker's pinned loadout.
+    # Treat omission as inheritance; only an explicit conflicting value is drift.
+    trusted_declared_model = trusted.get("model") or declared_model
     trusted_cli_model = (
         worker.get("requested_model_cli")
-        if trusted.get("model") == worker.get("model") and worker.get("requested_model_cli")
-        else trusted.get("model")
+        if trusted_declared_model == declared_model and worker.get("requested_model_cli")
+        else trusted_declared_model
     )
     if tmodel is not None and tmodel != trusted_cli_model:
         raise BackendContractError(
             f"{name}.trusted_writer_profile model does not match args_template")
-    if teffort is not None and teffort != trusted.get("effort"):
+    trusted_declared_effort = trusted.get("effort") or declared_effort
+    if teffort is not None and teffort != trusted_declared_effort:
         raise BackendContractError(
             f"{name}.trusted_writer_profile effort does not match args_template")
 
@@ -268,7 +317,9 @@ def load_backend_contract(path):
     }
 
 
-def build_multiagent_execution_plan(contract, role="reviewer", selected_worker=None):
+def build_multiagent_execution_plan(
+        contract, role="reviewer", selected_worker=None, selected_model=None,
+        selected_effort=None, catalog_binding=None):
     topology = {
         "claude-conductor": {
             "conductor_surface": "claude-code",
@@ -288,6 +339,29 @@ def build_multiagent_execution_plan(contract, role="reviewer", selected_worker=N
     if not isinstance(raw, dict):
         raise BackendContractError(f"worker absent from backends contract: {worker_name}")
     trusted = raw.get("trusted_writer_profile")
+    dynamic = raw.get("dynamic_loadout")
+    effective_model = raw.get("model")
+    effective_effort = raw.get("effort")
+    model_selectable = isinstance(dynamic, dict)
+    effort_selectable = isinstance(dynamic, dict)
+    if (selected_model is None) != (selected_effort is None):
+        raise BackendContractError("model and effort overrides must be supplied together")
+    if selected_model is not None:
+        if not isinstance(dynamic, dict):
+            raise BackendContractError(f"{worker_name}: dynamic loadout is not enabled")
+        catalog_valid = (dynamic.get("selector") == "provider-catalog-v1" and isinstance(catalog_binding, dict)
+                         and catalog_binding.get("eligible") is True
+                         and catalog_binding.get("provider") == dynamic.get("catalog_provider")
+                         and catalog_binding.get("canonical_model_id") == selected_model
+                         and catalog_binding.get("effort") == selected_effort)
+        if not catalog_valid and selected_model not in dynamic.get("allowed_models", []):
+            raise BackendContractError(
+                f"{worker_name}: selected model is outside dynamic loadout allowlist")
+        if not catalog_valid and selected_effort not in dynamic.get("allowed_efforts", []):
+            raise BackendContractError(
+                f"{worker_name}: selected effort is outside dynamic loadout allowlist")
+        effective_model = selected_model
+        effective_effort = selected_effort
     writer_role = role in ("implementation_writer", "feature_branch_owner", "writer")
     trusted_enabled = isinstance(trusted, dict) and trusted.get("enabled") is True
     if writer_role and not trusted_enabled:
@@ -313,10 +387,13 @@ def build_multiagent_execution_plan(contract, role="reviewer", selected_worker=N
         "source_byte_sha256": contract.get("source_byte_sha256"),
         "semantic_sha256": contract.get("semantic_sha256"),
         "worker": {
-            "model": raw.get("model"),
-            "effort": raw.get("effort"),
-            "model_selectable": False,
-            "effort_selectable": False,
+            "model": effective_model,
+            "effort": effective_effort,
+            "default_model": raw.get("model"),
+            "default_effort": raw.get("effort"),
+            "model_selectable": model_selectable,
+            "effort_selectable": effort_selectable,
+            "dynamic_loadout": dynamic,
             "write_policy": raw.get("write_policy"),
             "trusted_writer_profile": trusted if trusted_enabled else None,
             "operation_proof_eligible": raw.get("operation_proof_eligible"),
@@ -788,7 +865,11 @@ def next_direct_tier(model, surface, caps):
     if model not in models:
         return None
     i = models.index(model)
-    return models[i + 1] if i + 1 < len(models) else None
+    next_model = models[i + 1] if i + 1 < len(models) else None
+    if surface == "codex-cli" and next_model and \
+            codex_model_availability(caps, next_model) == "unavailable":
+        return None
+    return next_model
 
 
 def next_effort(effort, surface, caps):
@@ -902,7 +983,23 @@ def _pick_worker(task, axes, axes_ext, caps, records):
     prior = caps.get("cold_start_prior", {})
     depth = axes.get("depth")
     verifiable = axes.get("verifiable")
-    if verifiable == "yes" and depth in ("shallow", "mid"):
+    task_fit = " ".join(
+        str(value or "").lower()
+        for value in (task, axes_ext.get("task_family"), axes_ext.get("role"))
+    )
+    compatibility_markers = (
+        "compat", "compatibility", "format", "alternate-vendor", "cross-vendor",
+        "호환", "포맷", "형식", "대체 공급자", "교차 공급자",
+    )
+    adversarial_markers = (
+        "adversarial", "counterexample", "attack path", "security review",
+        "반례", "공격 경로", "적대적", "보안 검토", "논리적 맹점",
+    )
+    if any(marker in task_fit for marker in compatibility_markers):
+        worker = "agy-compat"
+    elif any(marker in task_fit for marker in adversarial_markers):
+        worker = "grok-adversarial"
+    elif verifiable == "yes" and depth in ("shallow", "mid"):
         worker = "claude-main"
     elif axes.get("failcost") == "high":
         worker = "grok-adversarial"
@@ -916,14 +1013,90 @@ def _pick_worker(task, axes, axes_ext, caps, records):
     return worker, "heuristic", decision
 
 
-def _direct_effort(axes):
-    """Start low; never open above the normal ceiling."""
-    depth, failcost = axes.get("depth"), axes.get("failcost")
-    if depth == "deep" or failcost == "high":
-        return "high"
-    if depth == "mid":
-        return "medium"
-    return "low"
+def _direct_selection(axes, direct):
+    """Select model capability and deliberation as separate dimensions.
+
+    Depth determines the base capability tier. Failure cost raises the model tier,
+    while weak verification raises model capability and/or deliberation. `volume`
+    deliberately does not participate: it means model output volume and belongs to
+    the direct-vs-delegate break-even gate, not the quality floor.
+    """
+    depth = {"medium": "mid"}.get(axes.get("depth"), axes.get("depth"))
+    depth = depth if depth in ("shallow", "mid", "deep") else "mid"
+    failcost = axes.get("failcost") if axes.get("failcost") in ("low", "mid", "high") else "mid"
+    verifiable = axes.get("verifiable") if axes.get("verifiable") in ("yes", "partial", "no") else "partial"
+    policy = direct.get("selection_policy")
+    if not policy:
+        floor = direct["quality_floor"]
+        model = (floor["deep_or_high_failcost"] if depth == "deep" or failcost == "high"
+                 else floor["mid"] if depth == "mid" else floor["shallow_low_failcost"])
+        effort = "high" if depth == "deep" or failcost == "high" else (
+            "medium" if depth == "mid" else "low")
+        return model, effort, ["legacy_quality_floor"]
+
+    allowed = direct["recommendation_models"]
+    base_model = policy["base_model_by_depth"][depth]
+    model_index = allowed.index(base_model)
+    adjustments = []
+    if failcost == "high":
+        model_index += int(policy.get("high_failcost_model_steps", 0))
+        adjustments.append("high_failcost")
+    if verifiable == "no":
+        model_index += int(policy.get("unverifiable_model_steps", 0))
+        adjustments.append("unverifiable_output")
+    model = allowed[min(model_index, len(allowed) - 1)]
+
+    effort_index = {"shallow": 0, "mid": 1, "deep": 2}[depth]
+    if verifiable == "partial":
+        effort_index += int(policy.get("partial_effort_steps", 0))
+        adjustments.append("partial_verifiability")
+    elif verifiable == "no":
+        effort_index += int(policy.get("unverifiable_effort_steps", 0))
+        adjustments.append("verifiability")
+    effort = NORMAL_EFFORT_LADDER[min(effort_index, len(NORMAL_EFFORT_LADDER) - 1)]
+    return model, effort, adjustments
+
+
+def _classification_receipt(axes, direct):
+    """Expose the operator-declared boundary and nearby outcomes.
+
+    The engine cannot infer task depth or failure cost from prose.  Returning the
+    scope contract and one-axis counterfactuals makes whole-project inflation
+    visible before a recommendation is repeated as fact.
+    """
+    current_model, current_effort, _ = _direct_selection(axes, direct)
+    variants = []
+    changes = (
+        ("narrower_depth", "depth", {"deep": "mid", "mid": "shallow"}),
+        ("lower_failure_cost", "failcost", {"high": "mid"}),
+        ("stronger_verification", "verifiable", {"no": "partial", "partial": "yes"}),
+    )
+    for label, axis, mapping in changes:
+        old = axes.get(axis)
+        new = mapping.get(old)
+        if new is None:
+            continue
+        candidate = dict(axes)
+        candidate[axis] = new
+        model, effort, _ = _direct_selection(candidate, direct)
+        if (model, effort) == (current_model, current_effort):
+            continue
+        variants.append({
+            "condition": f"if evidence supports {axis}={new}",
+            "change": label,
+            "model": model,
+            "effort": effort,
+        })
+    return {
+        "scope": "next_bounded_action",
+        "rules": [
+            "depth describes the next bounded action, not the whole project; planning alone is not deep",
+            "failcost=high only when a wrong result can cause material harm before an independent check",
+            "verifiable=yes when deterministic tests or exact evidence decide this step",
+            "an advisor model is an independent reviewer and never substitutes for this direct-route result",
+        ],
+        "axis_sensitivity": variants,
+    }
 
 
 def select_direct_model(surface, axes, caps, *, quota_state=None,
@@ -936,27 +1109,32 @@ def select_direct_model(surface, axes, caps, *, quota_state=None,
             "model": None,
             "model_effort_selectable": False,
         }
-    depth = axes.get("depth")
-    high_risk = depth == "deep" or axes.get("failcost") == "high"
-    mid = depth == "mid"
     direct = caps["direct_execution"][surface]
-    floor = direct["quality_floor"]
-    chosen = (
-        floor["deep_or_high_failcost"] if high_risk
-        else floor["mid"] if mid
-        else floor["shallow_low_failcost"]
-    )
+    chosen, effort, adjustments = _direct_selection(axes, direct)
     vendor = "openai" if surface == "codex-cli" else "anthropic"
     allow = direct["recommendation_models"]
     if chosen not in allow:
         raise ValueError(f"quality-floor model is not in surface allowlist: {chosen}")
-    availability = (model_availability or {}).get(chosen, quota_state or "unknown")
+    if surface == "codex-cli":
+        supported = caps.get("_codex_account_inventory", {}).get("model_efforts", {}).get(chosen)
+        if supported is not None and effort not in supported:
+            return {"route": "BLOCKED_MODEL_EFFORT", "model": None, "effort": effort,
+                    "model_effort_selectable": False,
+                    "reason": f"{chosen} does not support requested effort {effort}"}
+    availability = (model_availability or {}).get(chosen)
+    if availability is None:
+        availability = codex_model_availability(caps, chosen) \
+            if surface == "codex-cli" else None
+    if availability is None:
+        availability = quota_state or "unknown"
     stages = [
         {
             "stage": "quality_floor",
             "status": "PASS",
             "model": chosen,
-            "reason": "minimum sufficient model for depth and failure cost",
+            "effort": effort,
+            "adjustments": adjustments,
+            "reason": "depth base plus independent failure-cost and verifiability adjustments",
         },
         {
             "stage": "availability",
@@ -988,7 +1166,7 @@ def select_direct_model(surface, axes, caps, *, quota_state=None,
         "surface": surface,
         "vendor": vendor,
         "model": chosen,
-        "effort": _direct_effort(axes),
+        "effort": effort,
         "model_effort_selectable": True,
         "selection_stages": stages,
     }
@@ -1001,13 +1179,38 @@ def _discover_backend_path(explicit=None):
     if env_path:
         return Path(env_path)
     candidate = Path.cwd() / "_shared" / "backends.json"
-    return candidate if candidate.is_file() and not candidate.is_symlink() else None
+    if candidate.is_file() and not candidate.is_symlink():
+        try:
+            local = json.loads(candidate.read_text(encoding="utf-8"))
+            workers = local.get("workers", {})
+            if all(isinstance(workers.get(role, {}).get("dynamic_loadout"), dict)
+                   for role in ("codex-main", "codex-critic", "codex-recompute")):
+                return candidate
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+    # A worktree-local contract wins.  This user-level fallback lets sibling
+    # worktrees use the verified dispatcher when they do not vendor one.
+    fallback = Path.home() / "Developer" / "VibeCoding" / "_shared" / "backends.json"
+    return fallback if fallback.is_file() and not fallback.is_symlink() else None
 
 
 def _infer_role(task, axes_ext):
     if axes_ext.get("role"):
         return axes_ext["role"]
     text = (task or "").lower()
+    # The requested action outranks names of files, workers, or components in
+    # the review target.  Otherwise a code-review task mentioning
+    # "codex-recompute" is misrouted as a recomputation task.
+    if any(phrase in text for phrase in (
+            "code review", "review the patch", "review the diff", "regression review",
+            "critique the implementation", "코드 리뷰", "패치 검수", "diff 검수",
+            "구현 검수", "회귀 검토", "코드 검수")):
+        return "critic"
+    if any(phrase in text for phrase in (
+            "independent recomputation", "independent recalculation", "recompute",
+            "recalculate", "verify the numbers", "reproduce the calculation",
+            "독립 재계산", "재계산", "수치 재현", "계산 검증", "결과 재현")):
+        return "recompute"
     if any(word in text for word in (
             "implement", "build", "fix", "refactor", "rename", "migrate",
             "구현", "수정", "리팩터", "마이그레이션")):
@@ -1015,10 +1218,10 @@ def _infer_role(task, axes_ext):
     return "reviewer"
 
 
-def recommend(task, axes, axes_ext, caps=None, records=None, *, surface=None,
+def _recommend_legacy(task, axes, axes_ext, caps=None, records=None, *, surface=None,
               backends_path=None, candidate_model=None, rollout_stage=None,
               quota_state=None, optimization_goal=None, model_availability=None,
-              explicit_opt_in=False):
+              explicit_opt_in=False, catalog_enabled_gate=False):
     caps = caps or load_capabilities()
     records = records if records is not None else load_registry().records
     axes_ext = dict(axes_ext)
@@ -1088,15 +1291,43 @@ def recommend(task, axes, axes_ext, caps=None, records=None, *, surface=None,
                 "does not authorize production use"),
         })
         if not recommendation_only:
-            out["effort"] = _direct_effort(axes)
+            _, out["effort"], _ = _direct_selection(
+                axes, caps["direct_execution"]["claude-code"])
         return out
 
     # ---- optimization-goal gate ----------------------------------------------
-    # A mechanical batch has no economy worker to delegate to, so DELEGATE cannot
-    # buy a tier-based saving. Which route wins depends on what is being optimized,
-    # and that is not derivable from the axes. Do not fabricate a single winner.
+    # Fixed legacy roles need an optimization preference for mechanical batches.
+    # Catalog-enabled roles resolve their selectable pair later; neither path
+    # establishes a measured end-to-end cost advantage.
     econ = caps.get("economy", {})
+    inferred_delegate_role = _infer_role(task, axes_ext)
+    dynamic_role_worker = {
+        "implementation_writer": "codex-main",
+        "critic": "codex-critic",
+        "recompute": "codex-recompute",
+    }.get(inferred_delegate_role)
+    dynamic_role_economy = bool(
+        dynamic_role_worker
+        and caps.get("workers", {}).get(dynamic_role_worker, {}).get("delegation_selectable")
+    )
+    if catalog_enabled_gate and route == "DELEGATE":
+        catalog_backend_path = _discover_backend_path(backends_path)
+        if catalog_backend_path is not None:
+            try:
+                catalog_contract = load_backend_contract(catalog_backend_path)
+                if surface:
+                    from provider_catalog import provider_name
+                    catalog_provider=provider_name(surface)
+                    selected_catalog_worker={'codex': {'critic':'codex-critic','recompute':'codex-recompute'}.get(inferred_delegate_role,'codex-main'),
+                        'claude':'claude-main','grok':'grok-adversarial','agy':'agy-compat'}[catalog_provider]
+                else:
+                    selected_catalog_worker=_pick_worker(task,axes,axes_ext,caps,records)[0]
+                catalog_dynamic=catalog_contract['workers'][selected_catalog_worker].get('dynamic_loadout',{})
+                dynamic_role_economy = dynamic_role_economy or catalog_dynamic.get('selector')=='provider-catalog-v1'
+            except (BackendContractError,KeyError,ValueError):
+                pass  # invalid/fixed contracts never gain catalog selection authority
     if (route == "DELEGATE" and is_mechanical_batch(axes, axes_ext)
+            and not dynamic_role_economy
             and not econ.get("delegate_economy_loadout_available", True)):
         goal = axes_ext.get("optimization_goal")
         cost_note = (
@@ -1162,9 +1393,37 @@ def recommend(task, axes, axes_ext, caps=None, records=None, *, surface=None,
                 contract = load_backend_contract(contract_path)
                 default_worker = build_multiagent_execution_plan(
                     contract, role=role)["default_main_worker"]
-                selected = default_worker if role == "implementation_writer" else worker
+                role_workers = {
+                    "implementation_writer": default_worker,
+                    "critic": "codex-critic",
+                    "recompute": "codex-recompute",
+                }
+                selected = role_workers.get(role, worker)
+                selected_model = None
+                selected_effort = None
+                selected_raw = contract.get("workers", {}).get(selected, {})
+                if (selected_raw.get("dynamic_loadout") or {}).get("selector") == "router-v1":
+                    selected_model, selected_effort, _ = _direct_selection(
+                        axes, caps["direct_execution"]["codex-cli"])
                 plan = build_multiagent_execution_plan(
-                    contract, role=role, selected_worker=selected)
+                    contract, role=role, selected_worker=selected,
+                    selected_model=selected_model, selected_effort=selected_effort)
+                selected_availability = (model_availability or {}).get(selected_model)
+                if selected_availability is None and selected_model:
+                    selected_availability = codex_model_availability(caps, selected_model)
+                if selected_availability == "unavailable":
+                    out.update({
+                        "route": "BLOCKED_MODEL_AVAILABILITY",
+                        "execution_status": "BLOCKED",
+                        "worker": selected,
+                        "model": None,
+                        "effort": selected_effort,
+                        "model_effort_selectable": False,
+                        "model_availability": "unavailable",
+                        "reason": (f"{selected_model} is not exposed by the current Codex account; "
+                                   "refresh the inventory or choose an available allowlisted pair"),
+                    })
+                    return out
                 worker = selected
                 if contract["semantic_sha256"] != caps.get("backends_semantic_sha256"):
                     adapter_status = "DEGRADED_SEMANTIC_MISMATCH"
@@ -1184,17 +1443,41 @@ def recommend(task, axes, axes_ext, caps=None, records=None, *, surface=None,
         disp = w.get("dispatcher", {})
         fixed_model = plan["worker"]["model"] if plan else disp.get("model_requested")
         fixed_effort = plan["worker"]["effort"] if plan else disp.get("effort_requested")
+        dynamic_selected = bool(plan and plan["worker"].get("model_selectable"))
+        escalation = next_tier(worker, caps)
+        if dynamic_selected:
+            escalation = {
+                "reasoning_failure_next_effort": next_effort(
+                    fixed_effort, "codex-cli", caps),
+                "capability_failure_next_model": next_direct_tier(
+                    fixed_model, "codex-cli", caps),
+                "normal_effort_ceiling": NORMAL_EFFORT_CEILING,
+                "note": "Change one axis per verified failure; raise tier after High.",
+            }
         out.update({
             "worker": worker,
             "vendor": w.get("vendor"),
             "surface": w.get("surface"),
             "model": fixed_model,
             "effort": fixed_effort,
-            "model_effort_selectable": False,
+            "model_effort_selectable": dynamic_selected,
             "model_effort_note": (
-                "Model and effort are a property of the worker, fixed by backends.json. This skill "
-                "does not modify the dispatcher, so they are displayed, not recommended."),
-            "escalation": next_tier(worker, caps),
+                "This Codex role keeps a stable worker identity while the router selects its "
+                "allowlisted model and effort for the bounded task."
+                if dynamic_selected else
+                "Model and effort are a property of the worker, fixed by its backend contract."),
+            "execution_contract": ({
+                "mode": "multiagent_dynamic_loadout",
+                "changes_current_interactive_session": False,
+                "model": fixed_model,
+                "effort": fixed_effort,
+                "fallback_argv": [
+                    str(Path(plan["source_path"]).parent / "adapters" / "call_worker.sh"),
+                    worker, "<brief-file>", "--model", fixed_model,
+                    "--effort", fixed_effort,
+                ],
+            } if dynamic_selected else None),
+            "escalation": escalation,
             "evidence_tier": decision["tier"],
             "evidence": decision,
             "decision_source": source,
@@ -1228,9 +1511,25 @@ def recommend(task, axes, axes_ext, caps=None, records=None, *, surface=None,
         records, failcost=axes.get("failcost", "low"), cohort=cohort)
     out.update(selected)
     out.update({
+        "classification_receipt": _classification_receipt(
+            axes, caps["direct_execution"][selected["surface"]]),
         "model_effort_note": "Direct execution is the only place a real 2-axis ladder exists; "
-                             "switch with /model and /effort.",
+                             "reuse the current runtime only when it already matches, otherwise "
+                             "launch a bounded run with the selected model and effort.",
         "switch_commands": [f"/model {selected['model']}", f"/effort {effort}"],
+        "execution_contract": {
+            "mode": "reuse_current_or_launch_selected",
+            "changes_current_interactive_session": False,
+            "model": selected["model"],
+            "effort": effort,
+            "cwd": "current",
+            "prompt_transport": "stdin",
+            "fallback_argv": [
+                "codex", "exec", "--model", selected["model"],
+                "--config", f"model_reasoning_effort={effort}",
+                "--cd", "<current-cwd>", "-",
+            ],
+        },
         "escalation": {
             "next_effort": next_effort(effort, selected["surface"], caps),
             "note": "High is the normal ceiling; if it still fails, raise the tier, not the effort. "
@@ -1242,6 +1541,149 @@ def recommend(task, axes, axes_ext, caps=None, records=None, *, surface=None,
         "verifier": "state the check that decides success before running",
     })
     return out
+
+
+def recommend(task, axes, axes_ext, caps=None, records=None, *, surface=None,
+              requested_model=None, requested_effort=None, provider_executable=None,
+              codex_home=None, catalogs=None, use_catalog=False, **kwargs):
+    """Catalog-backed model binding; legacy policy/evidence/permission gates stay intact."""
+    from provider_catalog import (CatalogError, provider_name, resolve, load_catalog,
+                                  model_family as catalog_family)
+    out = _recommend_legacy(task, axes, axes_ext, caps, records, surface=surface,
+                            catalog_enabled_gate=use_catalog or catalogs is not None or requested_model is not None, **kwargs)
+    if not use_catalog and requested_model is None and catalogs is None:
+        return out
+    if kwargs.get('candidate_model'):
+        if requested_model is not None:
+            return dict(out, route='BLOCKED_EXPERIMENT_CONTRACT', reason='--model and Fable shadow candidate are separate')
+        return out
+    if out['route'] not in ('DIRECT', 'DELEGATE', 'NEEDS_SURFACE'):
+        return out
+    try:
+        route=out['route']
+        if route=='NEEDS_SURFACE':
+            if break_even(axes_ext)!='DIRECT':
+                return out
+            provider=provider_name(surface)
+            route='DIRECT'
+            out.update(route=route,surface={'grok':'grok-cli','agy':'agy-cli'}[provider])
+        else:
+            provider=provider_name(out.get('surface') or surface)
+        contract=None;raw=None;worker=out.get('worker')
+        if route=='DELEGATE':
+            path=_discover_backend_path(kwargs.get('backends_path'))
+            if path is None:
+                raise CatalogError('delegated catalog binding requires actual backend contract')
+            contract=load_backend_contract(path)
+            if surface:
+                requested_provider=provider_name(surface)
+                codex_worker={'critic':'codex-critic','recompute':'codex-recompute'}.get(_infer_role(task,axes_ext),'codex-main')
+                worker={'codex':codex_worker,'claude':'claude-main','grok':'grok-adversarial','agy':'agy-compat'}[requested_provider]
+                provider=requested_provider
+            raw=contract['workers'][worker]
+            dynamic=raw.get('dynamic_loadout',{})
+            if dynamic.get('selector')!='provider-catalog-v1' or dynamic.get('catalog_provider')!=provider:
+                raise CatalogError('worker has no matching catalog-backed loadout contract')
+            module=Path(__file__).resolve().with_name('provider_catalog.py')
+            if Path(dynamic.get('catalog_resolver_path','')).resolve()!=module or dynamic.get('catalog_resolver_sha256')!=hashlib.sha256(module.read_bytes()).hexdigest():
+                raise CatalogError('backend shared catalog resolver pin mismatch')
+            dependencies=dynamic.get('catalog_resolver_dependencies',{})
+            expected_dependency=hashlib.sha256(module.with_name('codex_inventory.py').read_bytes()).hexdigest()
+            if dependencies != {'codex_inventory.py':expected_dependency}:
+                raise CatalogError('backend catalog dependency pin mismatch')
+            provider_executable=raw['cli']['command']
+            # Existing dispatcher stages ~/.codex auth; conductor CODEX_HOME is a different account.
+            codex_home=str(Path.home()/'.codex') if provider=='codex' else None
+        catalog=(catalogs or {}).get(provider)
+        if catalog is None:
+            catalog=load_catalog(provider,executable=provider_executable,codex_home=codex_home)
+        level={'shallow':0,'mid':1,'deep':2}[axes.get('depth','mid')]
+        level += {'yes':0,'partial':1,'no':2}[axes.get('verifiable','yes')]
+        desired_effort=requested_effort or NORMAL_EFFORT_LADDER[min(level,2)]
+        if route=='DIRECT' and requested_effort is None and out.get('effort') in NORMAL_EFFORT_LADDER:
+            desired_effort=out['effort']
+        desired=requested_model
+        if desired is None:
+            old_model=out.get('model')
+            if route=='DELEGATE' and provider in ('codex','claude'):
+                policy_caps=caps or load_capabilities()
+                old_model,_,_=_direct_selection(axes,policy_caps['direct_execution']['codex-cli' if provider=='codex' else 'claude-code'])
+            family=catalog_family(old_model,provider) if old_model else None
+            if provider=='claude' and family.startswith('unknown:'):family='opus'
+            if provider=='agy':family='gemini-flash'
+            if provider=='grok':family='grok'
+            desired='latest:'+family if family else 'latest'
+        # Native no-effort models omit the dial instead of inventing medium.
+        explicit_rows=[r for r in catalog.get('models',[]) if desired in (r['canonical_model_id'],r.get('observed_model_id'))]
+        if explicit_rows and explicit_rows[0].get('supported_efforts')==['none'] and requested_effort is None:
+            desired_effort='none'
+        if desired.startswith('latest:haiku') and requested_effort is None:
+            desired_effort='none'
+        if provider=='grok' and requested_effort is None:
+            family=desired.split(':',1)[1] if desired.startswith('latest:') else ('grok' if desired=='latest' else None)
+            possible=[r for r in catalog.get('models',[]) if (r['family']==family if family else r['canonical_model_id']==desired)]
+            if possible:
+                newest=max(possible,key=lambda r:tuple(r['version']))
+                if newest.get('effort_status')=='unknown_default_only':desired_effort='config'
+        binding=resolve(provider,desired,desired_effort,catalog=catalog)
+        model=binding['canonical_model_id'];effort=binding['effort']
+        if any((kwargs.get('model_availability') or {}).get(key)=='unavailable' for key in (model,binding['cli_model'],requested_model) if key):
+            raise CatalogError('final selected model explicitly unavailable')
+        out['selection_stages']=[{'stage':'catalog_binding','status':'PASS','model':model,'effort':effort},
+            {'stage':'quality_floor','status':'EXPLICIT_OVERRIDE_UNVERIFIED' if requested_model else 'POLICY_FAMILY_CURRENT',
+             'model':model,'effort':effort,'reason':'Explicit model choice does not establish task quality sufficiency' if requested_model else 'Current version of policy-selected family'}]
+        if requested_model:out['explicit_quality_override']=True
+        receipt=out.get('classification_receipt')
+        if receipt:
+            for variant in receipt.get('axis_sensitivity',[]):
+                try:
+                    alt=resolve(provider,'latest:'+catalog_family(variant['model'],provider),variant['effort'],catalog=catalog)
+                    variant.update(model=alt['canonical_model_id'],effort=alt['effort'])
+                except CatalogError:
+                    variant.update(model=None,catalog_availability='unavailable')
+        out.update(route=route,model=model,effort=effort,model_effort_selectable=True,
+                   vendor={'codex':'openai','claude':'anthropic','grok':'xai','agy':'google'}[provider],
+                   model_family=binding['family'], surface={'codex':'codex-cli','claude':'claude-code','grok':'grok-cli','agy':'agy-cli'}[provider],
+                   decision_source='catalog_explicit_override' if requested_model else 'policy_family_current_catalog',
+                   provider_catalog_binding=binding,catalog_source=catalog['source'],
+                   catalog_freshness=catalog['freshness'],alternatives=binding['alternatives'],cost_comparison='unmeasured',
+                   reason='Exact current provider catalog binding; execution and task quality require independent verification.')
+        if provider=='agy':
+            out['vendor']='anthropic' if model.startswith('claude-') else 'openai' if model.startswith('gpt-') else 'google' if model.startswith('gemini-') else 'unknown'
+        out['escalation']={'next_effort': next((e for e in ('low','medium','high') if e in next((r['supported_efforts'] for r in catalog['models'] if r['canonical_model_id']==model),[]) and NORMAL_EFFORT_LADDER.index(e)>NORMAL_EFFORT_LADDER.index(effort)),None) if effort in NORMAL_EFFORT_LADDER else None,
+            'note':'Re-resolve the same fresh catalog before escalation; metadata does not establish task quality.'}
+        if route=='DELEGATE':
+            if provider=='claude' and raw.get('model_evidence_scope')=='PINNED_CLI_RESPONSE_MODEL_USAGE_METADATA' and not binding['model_evidence_keys']:
+                raise CatalogError('CLAUDE_MODEL_USAGE_IDENTITY_UNRESOLVED')
+            role=_infer_role(task,axes_ext)
+            plan=build_multiagent_execution_plan(contract,role=role,selected_worker=worker,
+                selected_model=model,selected_effort=effort,catalog_binding=binding)
+            out.update(worker=worker,multiagent_execution_plan=plan,execution_status=plan['execution_status'],
+                       surface=raw.get('surface') or {'codex':'codex-cli','claude':'claude-code','grok':'grok-cli','agy':'agy-cli'}[provider],
+                       model_effort_note='Stable worker permission profile; exact current catalog model/effort binding.')
+            out['execution_contract']={'mode':'multiagent_catalog_loadout','changes_current_interactive_session':False,
+                'model':model,'effort':effort,'fallback_argv':[str(Path(contract['source_path']).parent/'adapters/call_worker.sh'),
+                    worker,'<brief-file>','--model',model,'--effort',effort]}
+        else:
+            binary=provider_executable or provider
+            argv=[binary,'exec','--model',binding['cli_model']] if provider=='codex' else [binary,'--model',binding['cli_model']]
+            eb=binding['effort_binding']
+            if eb['flag']:
+                argv += [eb['flag'],eb['config_key']+'='+effort if eb['config_key'] else effort]
+            if provider=='codex':argv+=['--cd','<current-cwd>','-']
+            out['model_effort_note']='Current provider catalog binds exact model and supported effort; metadata is not runtime/generation proof.'
+            out['execution_contract']={'mode':'reuse_current_or_launch_selected','changes_current_interactive_session':False,
+                'model':model,'effort':effort,'cwd':'current','prompt_transport':'stdin','fallback_argv':argv}
+            out['switch_commands']=[f"/model {binding['cli_model']}"] + ([] if eb['mode'] in ('none','embedded') else [f'/effort {effort}'])
+            if provider!='codex':
+                out['execution_contract'].update(mode='current_session_selection_only',prompt_transport=None,fallback_argv=[],
+                    headless_fallback_supported=False,reason='Use the selected provider session or the verified delegate adapter; no generic headless argv is emitted.')
+                out['switch_commands']=[]
+                out['session_selection']={'cli_model':binding['cli_model'],'effort':effort,'effort_binding':eb,'native_command_syntax_verified':False}
+        return out
+    except (CatalogError,BackendContractError,KeyError,TypeError) as exc:
+        return dict(out,route='BLOCKED_PROVIDER_CATALOG',execution_status='BLOCKED',model=None,
+                    model_effort_selectable=False,reason=str(exc))
 
 
 # ---------- query / stats ----------
@@ -1364,13 +1806,42 @@ def _parse_axes(s):
 def cmd_recommend(a):
     axes = _parse_axes(a.axes)
     axes_ext = _parse_axes(a.axes_ext)
+    required_core = set(LEGACY_AXES)
+    required_ext = {
+        "handoff_cost", "spec_readiness", "decomposability",
+        "context_dependency", "verifier_available",
+    }
+    missing_core = sorted(required_core - set(axes))
+    missing_ext = sorted(required_ext - set(axes_ext))
+    valid_core = {
+        "verifiable": {"yes", "partial", "no"},
+        "failcost": {"low", "mid", "high"},
+        "volume": {"low", "high"},
+        "depth": {"shallow", "mid", "deep"},
+    }
+    invalid_core = {
+        key: axes.get(key) for key, allowed in valid_core.items()
+        if key in axes and axes.get(key) not in allowed
+    }
+    if missing_core or missing_ext or invalid_core:
+        print(json.dumps({
+            "route": "NEEDS_AXES",
+            "router_version": ROUTER_VERSION,
+            "error": "A recommendation requires explicit classification of the next bounded action",
+            "missing_core_axes": missing_core,
+            "missing_extended_axes": missing_ext,
+            "invalid_core_axes": invalid_core,
+        }, ensure_ascii=False, indent=2))
+        raise SystemExit(2)
     axes_ext.setdefault("volume", axes.get("volume"))
     if a.role:
         axes_ext["role"] = a.role
     records = load_registry(a.registry).records
     availability = _parse_axes(a.model_availability)
-    print(json.dumps(recommend(
-        a.task, axes, axes_ext, load_capabilities(), records,
+    caps = load_capabilities()
+    inventory = None
+    result = recommend(
+        a.task, axes, axes_ext, caps, records,
         surface=a.surface,
         backends_path=a.backends,
         candidate_model=a.candidate_model,
@@ -1378,8 +1849,12 @@ def cmd_recommend(a):
         quota_state=a.quota_state,
         optimization_goal=a.optimization_goal,
         model_availability=availability,
-    ),
-                     ensure_ascii=False, indent=2))
+        requested_model=a.model, requested_effort=a.effort, provider_executable=a.executable or a.codex_executable,
+        codex_home=a.codex_home, use_catalog=True,
+    )
+    if inventory is not None:
+        result["codex_inventory"] = inventory
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def cmd_record(a):
@@ -1418,12 +1893,15 @@ def cmd_invalidate(a):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "catalog":
+        from provider_catalog import main as catalog_main
+        raise SystemExit(catalog_main())
     # --registry is accepted both before and after the subcommand
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--registry", default=None,
                         help="registry path (default: this skill's own registry.jsonl)")
 
-    ap = argparse.ArgumentParser(description="cross-vendor model/effort router (advisory)",
+    ap = argparse.ArgumentParser(description="cross-vendor model/effort router",
                                  parents=[common])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -1431,9 +1909,12 @@ def main():
     r.add_argument("task")
     r.add_argument("--axes", default="")
     r.add_argument("--axes-ext", dest="axes_ext", default="")
-    r.add_argument("--surface", default=None, help="codex | claude")
+    r.add_argument("--surface", default=None, help="codex | claude | grok | agy")
     r.add_argument("--backends", default=None, help="read-only backends.json path")
     r.add_argument("--role", default=None)
+    r.add_argument("--model", default=None, help="Exact observed ID or latest[:family]; separate from Fable shadow")
+    r.add_argument("--effort", default=None, help="Exact supported effort; native none/embedded variants respected")
+    r.add_argument("--executable", default=None, help="Configured absolute provider CLI for DIRECT metadata")
     r.add_argument("--candidate-model", dest="candidate_model", default=None)
     r.add_argument("--rollout-stage", dest="rollout_stage", choices=["v2", "v3"], default=None)
     r.add_argument("--quota-state", dest="quota_state",
@@ -1442,6 +1923,10 @@ def main():
                    choices=list(OPT_GOALS), default=None)
     r.add_argument("--model-availability", dest="model_availability", default="",
                    help="model=available|limited|unavailable comma list")
+    r.add_argument("--codex-home", dest="codex_home", default=None,
+                   help="active account's Codex home; default: ancestor Codex process")
+    r.add_argument("--codex-executable", dest="codex_executable", default=None,
+                   help="Codex executable for bounded model/list; default: ancestor process")
     r.set_defaults(fn=cmd_recommend)
 
     q = sub.add_parser("query", parents=[common])

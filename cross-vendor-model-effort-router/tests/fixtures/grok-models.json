@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "/Users/test-user/.grok/bin/grok",
+    "models"
+  ],
+  "exit": 0,
+  "observed_at": "2026-10-03T11:27:43.613269+00:00",
+  "sanitized_model_lines": [
+    "Default model: grok-4.7",
+    "  * grok-4.7 (default)",
+    "  - grok-4.7-build-fast",
+    "  - grok-4.6",
+    "  - grok-4.5"
+  ],
+  "stderr_present": false,
+  "limitation": "Non-model status/account lines omitted. CLI catalog, not generation/quota proof."
+}

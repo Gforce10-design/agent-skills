@@ -13,6 +13,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from datetime import datetime, timezone
+from itertools import product
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -131,6 +134,11 @@ class TestLegacyCompat(unittest.TestCase):
     def test_legacy_gpt_model_infers_openai_vendor(self):
         self.assertEqual(router.infer_vendor({"model": "gpt-5.6-sol"}), "openai")
         self.assertEqual(router.infer_vendor({"model": "gpt-4.1-mini"}), "openai")
+
+    def test_gpt6_models_share_their_own_evidence_family(self):
+        for model in ("gpt-6-luna", "gpt-6-sol", "gpt-6-astra"):
+            with self.subTest(model=model):
+                self.assertEqual(router.model_family(model), "gpt-6")
 
     def test_unknown_model_preserved_as_unknown_not_crash(self):
         self.assertEqual(router.infer_vendor({"model": "wat-9000"}), "unknown")
@@ -380,6 +388,11 @@ class TestRegistryIntegrity(unittest.TestCase):
 class TestDecisionFlow(unittest.TestCase):
     def setUp(self):
         self.caps = router.load_capabilities()
+        # Route fixtures assume every model in the current GPT-6 ladder is exposed.
+        # The real local account snapshot is asserted separately.
+        self.caps["_codex_account_inventory"]["available_recommendation_models"] = [
+            "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"]
+        self.caps["_codex_account_inventory"]["official_but_not_exposed"] = []
 
     def test_unclear_spec_returns_plan_first(self):
         r = router.recommend(task="build something nice", axes={},
@@ -406,12 +419,15 @@ class TestDecisionFlow(unittest.TestCase):
                                        "handoff_cost": "low", "context_dependency": "low",
                                        "decomposability": "independent",
                                        "verifier_available": "yes",
-                                       "optimization_goal": "latency"},
+                                       "optimization_goal": "latency",
+                                       "role": "reviewer"},
                              caps=self.caps, records=[])
         self.assertEqual(r["route"], "DELEGATE")
         self.assertIn(r["worker"], self.caps["workers"])
 
-    def test_delegate_reports_model_effort_as_worker_property_not_a_dial(self):
+    @patch("router._discover_backend_path", return_value=None)
+    def test_delegate_reports_model_effort_as_worker_property_not_a_dial(self, _discover):
+        # Historical fixed-worker policy must not depend on installed backend state.
         r = router.recommend(task="apply the same rename across 40 files",
                              axes={"verifiable": "yes", "failcost": "low",
                                    "volume": "high", "depth": "shallow"},
@@ -419,10 +435,111 @@ class TestDecisionFlow(unittest.TestCase):
                                        "handoff_cost": "low", "context_dependency": "low",
                                        "decomposability": "independent",
                                        "verifier_available": "yes",
-                                       "optimization_goal": "latency"},
+                                       "optimization_goal": "latency",
+                                       "role": "reviewer"},
                              caps=self.caps, records=[])
         self.assertFalse(r["model_effort_selectable"])
         self.assertIn("property of the worker", r["model_effort_note"])
+
+    def test_compatibility_review_cold_start_selects_agy(self):
+        r = router.recommend(
+            task="새 출력 형식의 교차 공급자 호환성을 검토하라",
+            axes={"verifiable": "yes", "failcost": "mid", "volume": "high", "depth": "mid"},
+            axes_ext={"spec_readiness": "executable", "volume": "high",
+                      "handoff_cost": "low", "context_dependency": "low",
+                      "decomposability": "independent", "verifier_available": "yes",
+                      "optimization_goal": "latency", "task_family": "compat-review",
+                      "role": "reviewer"},
+            caps=self.caps, records=[])
+        self.assertEqual(r["route"], "DELEGATE")
+        self.assertEqual(r["worker"], "agy-compat")
+
+    def test_adversarial_review_cold_start_selects_grok(self):
+        r = router.recommend(
+            task="보안 설계의 공격 경로와 반례를 독립적으로 검토하라",
+            axes={"verifiable": "partial", "failcost": "high", "volume": "high", "depth": "deep"},
+            axes_ext={"spec_readiness": "executable", "volume": "high",
+                      "handoff_cost": "low", "context_dependency": "low",
+                      "decomposability": "independent", "verifier_available": "yes",
+                      "optimization_goal": "quality", "task_family": "security-review",
+                      "role": "reviewer"},
+            caps=self.caps, records=[])
+        self.assertEqual(r["route"], "DELEGATE")
+        self.assertEqual(r["worker"], "grok-adversarial")
+
+    def test_implementation_delegate_uses_current_flavor_codex_main_worker(self):
+        with tempfile.TemporaryDirectory() as td:
+            backend = backend_fixture()
+            backend["workers"]["codex-main"]["model"] = "gpt-6-astra"
+            backend["workers"]["codex-main"]["trusted_writer_profile"] = {
+                "enabled": True,
+                "permission_class": "FEATURE_BRANCH_OWNER",
+                "gateway_commit": True,
+                "provider_git_write": False,
+                "args_template": ["exec", "--model", "gpt-6-astra", "@brief_stdin"],
+                "timeout": 900,
+            }
+            backend["workers"]["codex-main"]["dynamic_loadout"] = {
+                "selector": "router-v1",
+                "allowed_models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol",
+                                   "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"],
+                "allowed_efforts": ["low", "medium", "high"],
+                "default_model": "gpt-6-astra",
+                "fallback_effort": "config",
+            }
+            backend_path = Path(td) / "backends.json"
+            backend_path.write_text(json.dumps(backend), encoding="utf-8")
+            r = router.recommend(
+                task="정해진 명세대로 독립 모듈 40개를 구현하고 테스트하라",
+                axes={"verifiable": "yes", "failcost": "mid", "volume": "high", "depth": "mid"},
+                axes_ext={"spec_readiness": "executable", "volume": "high",
+                          "handoff_cost": "low", "context_dependency": "low",
+                          "decomposability": "independent", "verifier_available": "yes",
+                          "optimization_goal": "latency", "task_family": "implementation",
+                          "role": "implementation_writer"},
+                caps=self.caps, records=[], backends_path=backend_path)
+            self.assertEqual(r["route"], "DELEGATE")
+            self.assertEqual(r["worker"], "codex-main")
+            self.assertEqual((r["model"], r["effort"]), ("gpt-6-sol", "medium"))
+            self.assertTrue(r["model_effort_selectable"])
+            self.assertEqual(
+                r["execution_contract"]["fallback_argv"][-4:],
+                ["--model", "gpt-6-sol", "--effort", "medium"])
+            self.assertEqual(r["escalation"]["reasoning_failure_next_effort"], "high")
+            self.assertEqual(r["escalation"]["capability_failure_next_model"], "gpt-6-astra")
+            self.assertEqual(r["multiagent_execution_plan"]["writer_fit"], "READY")
+
+    def test_general_router_selects_codex_critic_and_recompute_by_task_fit(self):
+        with tempfile.TemporaryDirectory() as td:
+            backend = backend_fixture()
+            base = backend["workers"]["codex-main"]
+            base["model"] = "gpt-6-astra"
+            base["dynamic_loadout"] = {
+                "selector": "router-v1",
+                "allowed_models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol",
+                                   "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"],
+                "allowed_efforts": ["low", "medium", "high"],
+                "default_model": "gpt-6-astra",
+                "fallback_effort": "config",
+            }
+            for name in ("codex-critic", "codex-recompute"):
+                backend["workers"][name] = json.loads(json.dumps(base))
+            backend_path = Path(td) / "backends.json"
+            backend_path.write_text(json.dumps(backend), encoding="utf-8")
+            axes = {"verifiable": "yes", "failcost": "low", "volume": "high", "depth": "shallow"}
+            ext = {"spec_readiness": "executable", "volume": "high", "handoff_cost": "low",
+                   "context_dependency": "low", "decomposability": "independent",
+                   "verifier_available": "yes"}
+            for task, expected in (
+                ("이 패치의 코드 리뷰와 회귀 검토를 수행하라", "codex-critic"),
+                ("codex-recompute 접근 패치의 코드 리뷰와 회귀 검토를 수행하라", "codex-critic"),
+                ("이 표의 계산을 독립 재계산하여 수치를 검증하라", "codex-recompute"),
+            ):
+                result = router.recommend(
+                    task, axes, ext, caps=self.caps, records=[], backends_path=backend_path)
+                self.assertEqual(result["route"], "DELEGATE")
+                self.assertEqual(result["worker"], expected)
+                self.assertEqual((result["model"], result["effort"]), ("gpt-6-luna", "low"))
 
     def test_direct_route_offers_a_real_session_ladder(self):
         r = router.recommend(task="fix a typo in one file",
@@ -433,6 +550,21 @@ class TestDecisionFlow(unittest.TestCase):
                              caps=self.caps, records=[], surface="codex")
         self.assertTrue(r["model_effort_selectable"])
         self.assertIn(r["effort"], ["low", "medium", "high"])
+
+    def test_direct_route_emits_safe_auto_execution_contract(self):
+        r = router.recommend(task="fix a typo in one file",
+                             axes={"verifiable": "yes", "failcost": "low",
+                                   "volume": "low", "depth": "shallow"},
+                             axes_ext={"spec_readiness": "executable", "volume": "low",
+                                       "handoff_cost": "high", "context_dependency": "high"},
+                             caps=self.caps, records=[], surface="codex")
+        contract = r["execution_contract"]
+        self.assertEqual(contract["model"], r["model"])
+        self.assertEqual(contract["effort"], r["effort"])
+        self.assertFalse(contract["changes_current_interactive_session"])
+        self.assertEqual(contract["prompt_transport"], "stdin")
+        self.assertEqual(contract["fallback_argv"][-1], "-")
+        self.assertNotIn(r["task"], contract["fallback_argv"])
 
     def test_direct_recommendation_never_starts_above_high(self):
         for depth in ("shallow", "mid", "deep"):
@@ -651,6 +783,7 @@ class TestCapabilitiesHonesty(unittest.TestCase):
         the DIRECT path does have lower tiers."""
         e = self.caps["economy"]
         self.assertFalse(e["delegate_economy_loadout_available"])
+        self.assertTrue(e["delegate_dynamic_economy_loadout_available"])
         self.assertTrue(e["direct_lower_tier_selection_available"])
         self.assertNotIn("economy_tier_available", json.dumps(self.caps))
 
@@ -665,12 +798,10 @@ class TestCapabilitiesHonesty(unittest.TestCase):
             self.assertEqual(w["dispatcher"].get("cost_rank_cross_vendor"), "unknown",
                              f"{name}: cross-vendor cost ranking is not measured")
 
-    def test_no_worker_is_delegation_model_selectable(self):
+    def test_only_codex_roles_are_delegation_model_selectable(self):
         for name, w in self.caps["workers"].items():
-            if "alias_of" in w:
-                continue
-            self.assertFalse(w.get("delegation_selectable", False),
-                             f"{name}: dispatcher fixes the loadout; skill does not modify it")
+            expected = name in {"codex-main", "codex-critic", "codex-recompute"}
+            self.assertEqual(w.get("delegation_selectable", False), expected, name)
 
     def test_every_worker_records_requested_not_observed(self):
         for name, w in self.caps["workers"].items():
@@ -695,8 +826,8 @@ class TestCapabilitiesHonesty(unittest.TestCase):
         self.assertEqual(
             set(self.caps["workers"]),
             {"claude-main", "agy-compat", "grok-adversarial",
-             "codex-main", "codex-critic", "gemini"})
-        for alias in ("codex-critic", "gemini"):
+             "codex-main", "codex-critic", "codex-recompute", "gemini"})
+        for alias in ("codex-critic", "codex-recompute", "gemini"):
             target = self.caps["workers"][alias]["alias_of"]
             self.assertIn(target, self.caps["workers"])
             self.assertEqual(
@@ -707,6 +838,10 @@ class TestCapabilitiesHonesty(unittest.TestCase):
 class TestSurfaceLockedDirectRecommendation(unittest.TestCase):
     def setUp(self):
         self.caps = router.load_capabilities()
+        self.caps["_codex_account_inventory"]["captured_at"] = datetime.now(timezone.utc).isoformat()
+        self.caps["_codex_account_inventory"]["available_recommendation_models"] = [
+            "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"]
+        self.caps["_codex_account_inventory"]["official_but_not_exposed"] = []
         self.shallow = {
             "verifiable": "yes", "failcost": "low", "volume": "low", "depth": "shallow"
         }
@@ -732,23 +867,25 @@ class TestSurfaceLockedDirectRecommendation(unittest.TestCase):
         self.assertEqual(r["route"], "NEEDS_SURFACE")
 
     def test_codex_quality_floor_is_the_declared_one(self):
-        """🔴 층 1/2 — 바닥의 **내용**을 리터럴로 못박는다.
+        """🔴 층 1/2 — 깊이별 기본 모델과 위험 승격 규칙을 리터럴로 못박는다.
 
         아래 라우팅 시험은 기대값을 quality_floor 에서 뽑는다. 그것만 있으면 바닥이
         조용히 바뀌어도 시험이 따라가서 아무도 모른다. 그래서 바닥 자체는 여기서 리터럴로
         고정한다 — 모델을 올릴 때 이 시험이 **먼저** 빨개져서 의도적 갱신을 강제한다.
-        2026-09-06: codex 최상위를 gpt-5.6-sol → gpt-6-astra 로 올렸다(라이브 프로브로
-        4종 모두 응답 확인, 없는 id 는 provider 400).
+        2026-09-23: direct ladder를 공식 GPT-6 Luna/Sol/Astra 계열로 전환했다.
+        계정별 모델 접근은 recommendation tier와 별도의 availability 입력으로 판정한다.
         """
-        floor = self.caps["direct_execution"]["codex-cli"]["quality_floor"]
+        policy = self.caps["direct_execution"]["codex-cli"]["selection_policy"]
         self.assertEqual(
             {
-                "shallow_low_failcost": "gpt-5.6-luna",
-                "mid": "gpt-5.6-terra",
-                "deep_or_high_failcost": "gpt-6-astra",
+                "shallow": "gpt-6-luna",
+                "mid": "gpt-6-sol",
+                "deep": "gpt-6-sol",
             },
-            floor,
+            policy["base_model_by_depth"],
         )
+        self.assertEqual(policy["high_failcost_model_steps"], 1)
+        self.assertEqual(policy["unverifiable_model_steps"], 1)
 
     def test_codex_direct_uses_only_the_recommendation_allowlist(self):
         """층 2/2 — 라우팅이 바닥을 따르고, 표면 잠금을 지키는가.
@@ -757,16 +894,165 @@ class TestSurfaceLockedDirectRecommendation(unittest.TestCase):
         타 벤더 모델이 아님을 함께 단언한다 — 라우터가 엉뚱한 것을 내면 여전히 빨개진다.
         """
         cx = self.caps["direct_execution"]["codex-cli"]
-        floor = cx["quality_floor"]
-        for axes, key in (
-            (self.shallow, "shallow_low_failcost"),
-            (self.mid, "mid"),
-            (self.deep, "deep_or_high_failcost"),
+        for axes, expected in (
+            (self.shallow, "gpt-6-luna"),
+            (self.mid, "gpt-6-sol"),
+            (dict(self.shallow, depth="deep", failcost="low"), "gpt-6-sol"),
+            (self.deep, "gpt-6-astra"),
         ):
             r = self.rec("codex", axes)
-            self.assertEqual(r["model"], floor[key])
+            self.assertEqual(r["model"], expected)
             self.assertIn(r["model"], cx["recommendation_models"])
             self.assertNotIn("claude", r["model"])
+
+    def test_active_orca_session_snapshot_exposes_the_gpt6_ladder(self):
+        caps = router.load_capabilities()
+        for axes, model in ((self.shallow, "gpt-6-luna"),
+                            (self.mid, "gpt-6-sol"),
+                            (self.deep, "gpt-6-astra")):
+            with self.subTest(model=model):
+                result = router.select_direct_model("codex-cli", axes, caps)
+                self.assertEqual(result["route"], "DIRECT")
+                self.assertEqual(result["model"], model)
+
+    def test_account_snapshot_still_blocks_a_model_if_not_exposed(self):
+        caps = router.load_capabilities()
+        caps["_codex_account_inventory"]["captured_at"] = datetime.now(timezone.utc).isoformat()
+        caps["_codex_account_inventory"]["available_recommendation_models"] = [
+            "gpt-6-astra"]
+        caps["_codex_account_inventory"]["official_but_not_exposed"] = [
+            "gpt-6-luna", "gpt-6-sol"]
+        result = router.select_direct_model("codex-cli", self.shallow, caps)
+        self.assertEqual(result["route"], "BLOCKED_MODEL_AVAILABILITY")
+        self.assertEqual(result["selection_stages"][1]["signal"], "unavailable")
+
+    def test_explicit_account_availability_overrides_the_snapshot(self):
+        caps = router.load_capabilities()
+        caps["_codex_account_inventory"]["available_recommendation_models"] = [
+            "gpt-6-astra"]
+        caps["_codex_account_inventory"]["official_but_not_exposed"] = [
+            "gpt-6-luna"]
+        result = router.select_direct_model(
+            "codex-cli", self.shallow, caps,
+            model_availability={"gpt-6-luna": "available"})
+        self.assertEqual((result["model"], result["effort"]), ("gpt-6-luna", "low"))
+
+    def test_codex_matrix_uses_risk_and_verifiability_without_two_combo_collapse(self):
+        cases = (
+            ({"depth": "shallow", "failcost": "low", "verifiable": "yes"},
+             ("gpt-6-luna", "low")),
+            ({"depth": "mid", "failcost": "low", "verifiable": "yes"},
+             ("gpt-6-sol", "medium")),
+            ({"depth": "mid", "failcost": "high", "verifiable": "yes"},
+             ("gpt-6-astra", "medium")),
+            ({"depth": "deep", "failcost": "low", "verifiable": "yes"},
+             ("gpt-6-sol", "high")),
+            ({"depth": "mid", "failcost": "high", "verifiable": "no"},
+             ("gpt-6-astra", "high")),
+        )
+        observed = set()
+        for partial_axes, expected in cases:
+            axes = dict(partial_axes, volume="low")
+            r = self.rec("codex", axes)
+            observed.add((r["model"], r["effort"]))
+            self.assertEqual((r["model"], r["effort"]), expected)
+        self.assertEqual(len(observed), 5)
+
+    def test_real_transition_slices_reach_all_four_models(self):
+        cases = (
+            ("exact mechanical edit",
+             {"depth": "shallow", "failcost": "low", "verifiable": "yes", "volume": "low"},
+             ("gpt-6-luna", "low")),
+            ("settled connector implementation with fixture tests",
+             {"depth": "mid", "failcost": "mid", "verifiable": "yes", "volume": "low"},
+             ("gpt-6-sol", "medium")),
+            ("new semantic policy with independent review before any effect",
+             {"depth": "deep", "failcost": "mid", "verifiable": "partial", "volume": "low"},
+             ("gpt-6-sol", "high")),
+            ("deep live-risk decision with only partial verification",
+             {"depth": "deep", "failcost": "high", "verifiable": "partial", "volume": "low"},
+             ("gpt-6-astra", "high")),
+        )
+        for task, axes, expected in cases:
+            with self.subTest(task=task):
+                result = router.recommend(
+                    task=task, axes=axes, axes_ext=self.ext,
+                    caps=self.caps, records=[], surface="codex")
+                self.assertEqual((result["model"], result["effort"]), expected)
+                self.assertEqual(
+                    result["classification_receipt"]["scope"], "next_bounded_action")
+
+    def test_classification_receipt_exposes_sol_boundary_from_astra(self):
+        axes = {"depth": "deep", "failcost": "high", "verifiable": "partial",
+                "volume": "low"}
+        result = self.rec("codex", axes)
+        sensitivity = result["classification_receipt"]["axis_sensitivity"]
+        self.assertIn(
+            ("gpt-6-sol", "high"),
+            {(item["model"], item["effort"]) for item in sensitivity})
+
+    def test_partial_verifiability_raises_effort_without_forcing_top_model(self):
+        axes = {"depth": "shallow", "failcost": "low", "verifiable": "partial",
+                "volume": "low"}
+        r = self.rec("codex", axes)
+        self.assertEqual((r["model"], r["effort"]), ("gpt-6-luna", "medium"))
+        self.assertIn("partial_verifiability", r["selection_stages"][0]["adjustments"])
+
+    def test_all_codex_axis_combinations_are_monotonic_and_reach_every_model(self):
+        depths = ("shallow", "mid", "deep")
+        failcosts = ("low", "mid", "high")
+        verifiability = ("yes", "partial", "no")
+        models = self.caps["direct_execution"]["codex-cli"]["recommendation_models"]
+        effort_rank = {"low": 0, "medium": 1, "high": 2}
+        observed_models = set()
+        grid = {}
+
+        for depth, failcost, verifiable in product(
+                depths, failcosts, verifiability):
+            axes = {
+                "depth": depth, "failcost": failcost,
+                "verifiable": verifiable, "volume": "low",
+            }
+            result = router.select_direct_model("codex-cli", axes, self.caps)
+            grid[(depth, failcost, verifiable)] = (
+                models.index(result["model"]), effort_rank[result["effort"]])
+            observed_models.add(result["model"])
+
+        self.assertEqual(observed_models, set(models))
+        domains = (depths, failcosts, verifiability)
+        for axis_values, axis_index in (
+                (depths, 0), (failcosts, 1), (verifiability, 2)):
+            remaining = [i for i in range(3) if i != axis_index]
+            for lower, higher in zip(axis_values, axis_values[1:]):
+                for other_a, other_b in product(
+                        domains[remaining[0]], domains[remaining[1]]):
+                    low_key = [None, None, None]
+                    high_key = [None, None, None]
+                    low_key[axis_index] = lower
+                    high_key[axis_index] = higher
+                    low_key[remaining[0]] = high_key[remaining[0]] = other_a
+                    low_key[remaining[1]] = high_key[remaining[1]] = other_b
+                    low_rank = grid[tuple(low_key)]
+                    high_rank = grid[tuple(high_key)]
+                    self.assertGreaterEqual(high_rank[0], low_rank[0])
+                    self.assertGreaterEqual(high_rank[1], low_rank[1])
+
+    def test_volume_does_not_change_direct_quality_selection(self):
+        for depth, failcost, verifiable in product(
+                ("shallow", "mid", "deep"),
+                ("low", "mid", "high"),
+                ("yes", "partial", "no")):
+            base = {
+                "depth": depth, "failcost": failcost,
+                "verifiable": verifiable,
+            }
+            low = router.select_direct_model(
+                "codex-cli", dict(base, volume="low"), self.caps)
+            high = router.select_direct_model(
+                "codex-cli", dict(base, volume="high"), self.caps)
+            self.assertEqual(
+                (low["model"], low["effort"]),
+                (high["model"], high["effort"]))
 
     def test_claude_direct_uses_only_claude_family(self):
         for axes, expected in (
@@ -788,7 +1074,7 @@ class TestSurfaceLockedDirectRecommendation(unittest.TestCase):
         # 모델명은 바닥에서 뽑는다 — 위 리터럴 시험이 바닥 자체를 지킨다.
         self.assertEqual(
             r["model"],
-            self.caps["direct_execution"]["codex-cli"]["quality_floor"]["deep_or_high_failcost"],
+            "gpt-6-astra",
         )
         self.assertEqual(r["selection_stages"][0]["stage"], "quality_floor")
         self.assertEqual(r["selection_stages"][1]["stage"], "availability")
@@ -866,6 +1152,29 @@ class TestBackendContractAdapter(unittest.TestCase):
             with self.assertRaises(router.BackendContractError):
                 router.load_backend_contract(p)
 
+    def test_trusted_writer_may_inherit_worker_model_and_effort(self):
+        with tempfile.TemporaryDirectory() as d:
+            payload = backend_fixture()
+            worker = payload["workers"]["codex-main"]
+            worker["model"] = "gpt-6-astra"
+            worker["effort"] = "config"
+            worker["cli"]["args_template"] = [
+                "exec", "--model", "gpt-6-astra", "-"
+            ]
+            worker["trusted_writer_profile"] = {
+                "enabled": True,
+                "permission_class": "FEATURE_BRANCH_OWNER",
+                "gateway_commit": True,
+                "provider_git_write": False,
+                "args_template": [
+                    "exec", "--model", "gpt-6-astra", "@brief_stdin"
+                ],
+                "timeout": 900,
+            }
+            p = self.write_backend(d, payload)
+            contract = router.load_backend_contract(p)
+            self.assertEqual(contract["workers"]["codex-main"]["model"], "gpt-6-astra")
+
     def test_semantic_hash_ignores_json_whitespace_and_key_order(self):
         with tempfile.TemporaryDirectory() as d:
             p = self.write_backend(d, backend_fixture())
@@ -902,6 +1211,12 @@ class TestBackendContractAdapter(unittest.TestCase):
             p.write_text(json.dumps(payload), encoding="utf-8")
             third = router.load_backend_contract(p)["semantic_sha256"]
             self.assertNotEqual(first, third)
+
+            payload = backend_fixture()
+            payload["workers"]["codex-main"]["cli"]["required_help_tokens"] = ["--config"]
+            p.write_text(json.dumps(payload), encoding="utf-8")
+            fourth = router.load_backend_contract(p)["semantic_sha256"]
+            self.assertNotEqual(first, fourth)
 
     def test_recommendation_re_reads_and_degrades_on_semantic_mismatch(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1064,10 +1379,15 @@ class TestCLI(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             r = self._run("recommend", "apply the same rename across 40 files",
                           "--axes", "verifiable=yes,failcost=low,volume=high,depth=shallow",
+                          "--axes-ext", "handoff_cost=low,spec_readiness=executable,"
+                          "decomposability=independent,context_dependency=low,verifier_available=yes",
                           registry=Path(d) / "r.jsonl")
             self.assertEqual(r.returncode, 0, r.stderr)
             out = json.loads(r.stdout)
-            self.assertIn(out["route"], ("DIRECT", "PLAN_FIRST", "DELEGATE", "NEEDS_SURFACE"))
+            self.assertIn(
+                out["route"],
+                ("DIRECT", "PLAN_FIRST", "DELEGATE", "NEEDS_SURFACE", "NEEDS_PREFERENCE",
+                 "BLOCKED_MODEL_AVAILABILITY", "BLOCKED_PROVIDER_CATALOG"))
 
     def test_validate_reports_invalid_lines(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1092,11 +1412,14 @@ class TestCLI(unittest.TestCase):
                 "--surface", "codex",
                 "--axes", "verifiable=yes,failcost=low,volume=low,depth=shallow",
                 "--axes-ext",
-                "spec_readiness=executable,volume=low,handoff_cost=high,context_dependency=high",
+                "spec_readiness=executable,volume=low,handoff_cost=high,"
+                "decomposability=single,context_dependency=high,verifier_available=yes",
                 registry=Path(d) / "r.jsonl")
             self.assertEqual(r.returncode, 0, r.stderr)
             out = json.loads(r.stdout)
-            self.assertEqual(out["model"], "gpt-5.6-luna")
+            self.assertEqual(out["route"], "DIRECT")
+            self.assertEqual(out["model"], "gpt-6-luna")
+            self.assertNotIn("claude", out["model"])
 
     def test_experimental_fable_cli_returns_shadow_plan_not_production(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1107,12 +1430,26 @@ class TestCLI(unittest.TestCase):
                 "--rollout-stage", "v2",
                 "--axes", "verifiable=yes,failcost=low,volume=low,depth=mid",
                 "--axes-ext",
-                "spec_readiness=executable,volume=low,handoff_cost=high,context_dependency=high",
+                "spec_readiness=executable,volume=low,handoff_cost=high,"
+                "decomposability=single,context_dependency=high,verifier_available=yes",
                 registry=Path(d) / "r.jsonl")
             self.assertEqual(r.returncode, 0, r.stderr)
             out = json.loads(r.stdout)
             self.assertEqual(out["route"], "SHADOW_EVALUATION")
             self.assertFalse(out["production_eligible"])
+
+    def test_recommend_fails_closed_when_axes_are_missing(self):
+        with tempfile.TemporaryDirectory() as d:
+            r = self._run(
+                "recommend", "semantic policy comparison",
+                "--surface", "codex",
+                registry=Path(d) / "r.jsonl")
+            self.assertEqual(r.returncode, 2)
+            out = json.loads(r.stdout)
+            self.assertEqual(out["route"], "NEEDS_AXES")
+            self.assertEqual(out["router_version"], router.ROUTER_VERSION)
+            self.assertIn("depth", out["missing_core_axes"])
+            self.assertIn("spec_readiness", out["missing_extended_axes"])
 
     def test_v3_fable_shadow_is_recommendation_only_not_selectable(self):
         with tempfile.TemporaryDirectory() as d:
@@ -1122,7 +1459,8 @@ class TestCLI(unittest.TestCase):
                 "--rollout-stage", "v3",
                 "--axes", "verifiable=yes,failcost=low,volume=low,depth=mid",
                 "--axes-ext",
-                "spec_readiness=executable,volume=low,handoff_cost=high,context_dependency=high",
+                "spec_readiness=executable,volume=low,handoff_cost=high,"
+                "decomposability=single,context_dependency=high,verifier_available=yes",
                 registry=Path(d) / "r.jsonl")
             self.assertEqual(r.returncode, 0, r.stderr)
             out = json.loads(r.stdout)

@@ -1,18 +1,24 @@
 {
-  "capability_profile_version": "2.0.0",
-  "captured_at": "2026-09-06",
+  "capability_profile_version": "2.5.0",
+  "captured_at": "2026-09-23",
   "stale_after_days": 30,
-  "backends_source_sha256": "767380b2a18937e99bdb22b164f6126912c5283f35e007f64f9c82f885dc52f6",
-  "backends_semantic_sha256": "acc0b3cf153253b0e4c0ef51d23c0a3a6490ae82b3531a51af6dd3b4fa272acc",
-  "_naming_note": "This is a dispatcher-configured loadout snapshot plus a vendor-CLI probe. It is NOT observed runtime behaviour. 'dispatcher' = what backends.json asks for. 'vendor_cli' = what the CLI itself offers. requested != observed. Past stale_after_days, lower recommendation confidence — never assume it is current.",
+  "backends_source_sha256": "2c50c35bdff2920789882ab97a7e91db0f400a150157493c97e2e761100c4f9c",
+  "backends_semantic_sha256": "3a523b8d9103704299c0efa7bec4ba5c626f6508c159f2d3886b2767d8333284",
+  "_naming_note": "Historical 2026-09-23 dispatcher/default and quality-policy snapshot. Static model IDs, role_notes, worker loadouts and CLI efforts below describe that baseline, not current selectable catalogs. Router 2.7 resolves current metadata through provider_catalog.py for catalog-enabled DIRECT/DELEGATE; legacy/fixed backends retain this baseline. Requested metadata is not observed runtime behaviour.",
   "economy": {
     "_note": "Economy availability is a PROPERTY OF THE PATH, not of the fleet. A single fleet-wide economy flag would be a false statement, because the DIRECT path does have lower tiers even though no delegate worker is pinned to one.",
     "delegate_economy_loadout_available": false,
-    "delegate_economy_reason": "Every worker in backends.json is pinned to a premium/frontier loadout (opus·max, gpt-5.6-sol·high, Gemini 3.1 Pro (High), grok-4.5·high). No worker is pinned to haiku, luna, or Flash.",
+    "delegate_economy_reason": "Economy loadouts are available only for the dynamically routed Codex roles, not for every delegate worker.",
     "direct_lower_tier_selection_available": true,
     "direct_lower_tier_reason": "The current session can switch to a cheaper model/effort via /model and /effort.",
     "cost_comparison_status": "unmeasured",
-    "cost_comparison_note": "No paired direct-vs-delegated end-to-end observations exist. Delegation cannot buy a tier-based saving here, but whether its TOTAL cost exceeds DIRECT is unmeasured — switching the session model also invalidates the prompt cache, and a delegate receives a small distilled spec rather than the whole session context."
+    "cost_comparison_note": "A lower-tier Codex delegate path now exists, but no paired direct-vs-delegated end-to-end billing observations establish total cost superiority.",
+    "delegate_dynamic_economy_loadout_available": true,
+    "delegate_dynamic_economy_roles": [
+      "codex-main",
+      "codex-critic",
+      "codex-recompute"
+    ]
   },
   "_probe_sources": {
     "dispatcher": "/Users/gimsuyeong/Developer/VibeCoding/_shared/backends.json",
@@ -20,7 +26,7 @@
     "claude": "claude --help (2.1.263)",
     "grok": "grok models (1.0.13)",
     "agy": "agy models (1.1.27)",
-    "codex": "codex --help (0.153.0) + ~/.codex/config.toml + 라이브 --model 프로브",
+    "codex": "codex --help (0.154.0) + 2026-09-20 bounded live route probes",
     "_codex_live_probe": "2026-09-06: gpt-6-astra·gpt-5.6-sol·gpt-5.6-luna·gpt-5.6-terra 각각 `codex exec --ephemeral --json -s read-only --model <m>` 로 응답 확인. 양성 대조: 존재하지 않는 id 는 provider 400 ('not supported when using Codex with a ChatGPT account')."
   },
   "_rules": {
@@ -61,7 +67,7 @@
         "effort_observed": null,
         "observation_source": "backends_config",
         "observation_status": "requested_not_verified",
-        "source_ref": "backends.json workers.claude-main.cli.args_template",
+        "source_ref": "backends.json workers.claude-main",
         "tier_class": "premium",
         "cost_rank_cross_vendor": "unknown",
         "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
@@ -110,13 +116,13 @@
       "surface": "grok-cli",
       "vendor": "xai",
       "dispatcher": {
-        "model_requested": "grok-4.5",
+        "model_requested": "grok-4.6",
         "effort_requested": "high",
         "model_observed": null,
         "effort_observed": null,
         "observation_source": "backends_config",
         "observation_status": "requested_not_verified",
-        "source_ref": "backends.json workers.grok-adversarial.cli.args_template",
+        "source_ref": "backends.json workers.grok-adversarial",
         "tier_class": "sole_available",
         "cost_rank_cross_vendor": "unknown",
         "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
@@ -147,7 +153,7 @@
       "vendor": "multi",
       "vendor_note": "agy is itself a multi-vendor surface: it serves Google, Anthropic and open-source models. 'agy-compat = Google' is an incorrect vendor attribution.",
       "dispatcher": {
-        "model_requested": "Gemini 3.1 Pro (High)",
+        "model_requested": "gemini-3.7-flash-high",
         "effort_requested": "model-high",
         "model_observed": null,
         "effort_observed": null,
@@ -157,7 +163,8 @@
         "tier_class": "premium",
         "cost_rank_cross_vendor": "unknown",
         "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
-        "economy_loadout": false
+        "economy_loadout": false,
+        "source_ref": "backends.json workers.agy-compat"
       },
       "vendor_cli": {
         "models": [
@@ -212,30 +219,29 @@
       "surface": "codex-cli",
       "vendor": "openai",
       "dispatcher": {
-        "model_requested": "codex-default",
+        "model_requested": "gpt-6-astra",
         "effort_requested": "config",
-        "effort_semantics": "externally_configured",
+        "effort_semantics": "router_selected_reasoning_depth",
         "model_observed": null,
         "effort_observed": null,
         "observation_source": "backends_config",
         "observation_status": "requested_not_verified",
-        "resolved_from": "~/.codex/config.toml",
-        "resolved_model": "gpt-5.6-sol",
-        "resolved_effort": "high",
-        "resolution_note": "'codex-default'/'config' is an unresolved indirection in backends.json. config.toml resolves it, but a session override would change it — do not treat the resolved value as observed.",
         "tier_class": "frontier",
         "cost_rank_cross_vendor": "unknown",
         "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
-        "economy_loadout": false
+        "economy_loadout": true,
+        "source_ref": "backends.json workers.codex-main"
       },
       "vendor_cli": {
         "models": [
           "gpt-5.6-sol",
           "gpt-5.6-terra",
           "gpt-5.6-luna",
-          "gpt-6-astra"
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-sol"
         ],
-        "models_status": "from_vendor_docs_not_cli_enumeration",
+        "models_status": "official_catalog_plus_codex_model_list_probe_2026-09-23",
         "effort_values": [
           "none",
           "low",
@@ -247,18 +253,87 @@
         "effort_semantics": "reasoning_depth",
         "comparison_scope": "openai:gpt-5.6",
         "cross_vendor_comparable": false,
-        "source": "codex --help (-m/--model, -c model_reasoning_effort) + vendor docs",
-        "default_model": "gpt-6-astra"
+        "source": "Codex app-server 0.155.1 model/list (authenticated inventory) + official OpenAI model catalog",
+        "default_model": "gpt-6-astra",
+        "model_efforts": {
+          "gpt-6-astra": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "gpt-6-sol": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "gpt-6-luna": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        "account_inventory_observation": {
+          "captured_at": "2026-09-23",
+          "method": "Codex app-server 0.155.1 model/list with includeHidden=true, limit=100; nextCursor=null",
+          "listed_models": [
+            "gpt-6-astra",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-daybreak-blue-latest",
+            "gpt-daybreak-red-latest",
+            "gpt-5.5",
+            "gpt-5.4",
+            "codex-auto-review"
+          ],
+          "gpt6_sol_luna_exposed": false,
+          "scope_note": "The model/list was queried from the local ~/.codex/auth.json execution context. The owner confirms the active Orca Codex Pro session currently uses GPT-6 models; treat that active-session confirmation as the availability source for routing.",
+          "active_orca_session_owner_confirmed_models": [
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna"
+          ],
+          "local_auth_model_list_scope": "Separate local CLI credential context; not authoritative for the active Orca session."
+        }
       },
-      "delegation_selectable": false,
+      "delegation_selectable": true,
       "tier_ladder": {
         "order": [
+          "gpt-6-luna",
+          "gpt-6-sol",
+          "gpt-6-astra"
+        ],
+        "applies_to": "delegated_codex_role",
+        "escalation_status": "router_selectable",
+        "legacy_compatibility_models": [
           "gpt-5.6-luna",
           "gpt-5.6-terra",
           "gpt-5.6-sol"
+        ]
+      },
+      "dynamic_loadout": {
+        "selector": "router-v1",
+        "allowed_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-sol"
         ],
-        "applies_to": "direct_execution_only",
-        "escalation_status": "available_for_direct_session_only"
+        "allowed_efforts": [
+          "low",
+          "medium",
+          "high"
+        ]
       }
     },
     "codex-critic": {
@@ -266,31 +341,58 @@
       "vendor": "openai",
       "alias_of": "codex-main",
       "dispatcher": {
-        "model_requested": "codex-default",
+        "model_requested": "gpt-6-astra",
         "effort_requested": "config",
-        "effort_semantics": "externally_configured",
+        "effort_semantics": "router_selected_reasoning_depth",
         "model_observed": null,
         "effort_observed": null,
         "observation_source": "backends_config",
         "observation_status": "requested_not_verified",
-        "resolved_from": "~/.codex/config.toml",
-        "resolved_model": "gpt-5.6-sol",
-        "resolved_effort": "high",
-        "resolution_note": "'codex-default'/'config' is an unresolved indirection in backends.json. config.toml resolves it, but a session override would change it — do not treat the resolved value as observed.",
         "tier_class": "frontier",
         "cost_rank_cross_vendor": "unknown",
         "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
-        "economy_loadout": false
+        "economy_loadout": true,
+        "source_ref": "backends.json workers.codex-main"
       },
-      "delegation_selectable": false,
-      "role_note": "Same executable and config as codex-main; distinct Mission role (reviewer). Producer and evaluator must differ."
+      "delegation_selectable": true,
+      "role_note": "Stable codex-critic role; model and effort are selected per bounded task from the backend allowlist.",
+      "dynamic_loadout": {
+        "selector": "router-v1",
+        "allowed_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-sol"
+        ],
+        "allowed_efforts": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "tier_ladder": {
+        "order": [
+          "gpt-6-luna",
+          "gpt-6-sol",
+          "gpt-6-astra"
+        ],
+        "applies_to": "delegated_codex_role",
+        "escalation_status": "router_selectable",
+        "legacy_compatibility_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol"
+        ]
+      }
     },
     "gemini": {
       "surface": "agy-cli",
       "vendor": "multi",
       "alias_of": "agy-compat",
       "dispatcher": {
-        "model_requested": "Gemini 3.1 Pro (High)",
+        "model_requested": "gemini-3.7-flash-high",
         "effort_requested": "model-high",
         "model_observed": null,
         "effort_observed": null,
@@ -300,14 +402,66 @@
         "tier_class": "premium",
         "cost_rank_cross_vendor": "unknown",
         "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
-        "economy_loadout": false
+        "economy_loadout": false,
+        "source_ref": "backends.json workers.agy-compat"
       },
       "delegation_selectable": false,
       "role_note": "Compatibility alias of agy-compat; fixed loadout and evidence cohort are shared."
+    },
+    "codex-recompute": {
+      "surface": "codex-cli",
+      "vendor": "openai",
+      "alias_of": "codex-main",
+      "dispatcher": {
+        "model_requested": "gpt-6-astra",
+        "effort_requested": "config",
+        "effort_semantics": "router_selected_reasoning_depth",
+        "model_observed": null,
+        "effort_observed": null,
+        "observation_source": "backends_config",
+        "observation_status": "requested_not_verified",
+        "tier_class": "frontier",
+        "cost_rank_cross_vendor": "unknown",
+        "cost_rank_note": "tier_class is a vendor-local label. It is NOT a cross-vendor cost ranking — no measured billing data exists to order these.",
+        "economy_loadout": true,
+        "source_ref": "backends.json workers.codex-main"
+      },
+      "delegation_selectable": true,
+      "role_note": "Stable codex-recompute role; model and effort are selected per bounded task from the backend allowlist.",
+      "dynamic_loadout": {
+        "selector": "router-v1",
+        "allowed_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6-sol"
+        ],
+        "allowed_efforts": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "tier_ladder": {
+        "order": [
+          "gpt-6-luna",
+          "gpt-6-sol",
+          "gpt-6-astra"
+        ],
+        "applies_to": "delegated_codex_role",
+        "escalation_status": "router_selectable",
+        "legacy_compatibility_models": [
+          "gpt-5.6-luna",
+          "gpt-5.6-terra",
+          "gpt-5.6-sol"
+        ]
+      }
     }
   },
   "direct_execution": {
-    "_note": "The ONLY place a real 2-axis ladder exists: the current session's own model/effort, changeable by the operator with /model and /effort.",
+    "_note": "The direct session uses this 2-axis ladder, and dynamically routed Codex delegate roles reuse the same quality policy within their backend allowlist.",
     "claude-code": {
       "models": [
         "haiku-4.5",
@@ -328,6 +482,18 @@
         "shallow_low_failcost": "haiku-4.5",
         "mid": "sonnet-5",
         "deep_or_high_failcost": "opus-5"
+      },
+      "selection_policy": {
+        "base_model_by_depth": {
+          "shallow": "haiku-4.5",
+          "mid": "sonnet-5",
+          "deep": "opus-5"
+        },
+        "high_failcost_model_steps": 1,
+        "unverifiable_model_steps": 1,
+        "partial_effort_steps": 1,
+        "unverifiable_effort_steps": 2,
+        "note": "Depth sets the base model. High failure cost and unverifiable output raise model capability independently; partial/no verification raises deliberation. Saturate at the surface ceiling."
       },
       "experimental_models": [
         "fable-5"
@@ -356,18 +522,32 @@
         "gpt-5.6-luna",
         "gpt-5.6-terra",
         "gpt-5.6-sol",
-        "gpt-6-astra"
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol"
       ],
       "recommendation_models": [
-        "gpt-5.6-luna",
-        "gpt-5.6-terra",
-        "gpt-5.6-sol",
+        "gpt-6-luna",
+        "gpt-6-sol",
         "gpt-6-astra"
       ],
       "quality_floor": {
-        "shallow_low_failcost": "gpt-5.6-luna",
-        "mid": "gpt-5.6-terra",
-        "deep_or_high_failcost": "gpt-6-astra"
+        "shallow_low_failcost": "gpt-6-luna",
+        "mid": "gpt-6-sol",
+        "deep": "gpt-6-sol",
+        "high_failcost": "gpt-6-astra"
+      },
+      "selection_policy": {
+        "base_model_by_depth": {
+          "shallow": "gpt-6-luna",
+          "mid": "gpt-6-sol",
+          "deep": "gpt-6-sol"
+        },
+        "high_failcost_model_steps": 1,
+        "unverifiable_model_steps": 1,
+        "partial_effort_steps": 1,
+        "unverifiable_effort_steps": 2,
+        "note": "GPT-6 family roles follow official OpenAI guidance: Luna for focused high-volume work, Sol for demanding coding and agentic work, and Astra for highest-capability work. Failure-cost and weak-verification adjustments raise model capability independently; account availability must be checked separately."
       },
       "effort_values": [
         "none",
@@ -385,7 +565,7 @@
         "/model"
       ],
       "default_model": "gpt-6-astra",
-      "_scope_note": "gpt-6-astra 는 gpt-5.6 과 다른 세대지만 effort 다이얼이 같다(model_reasoning_effort: low..max). comparison_scope 는 _scope_of() 의 **조회 키**라 모델 버전을 따라 바꾸면 안 된다 — 2026-09-06 에 'openai:gpt-5.6+gpt-6' 로 바꿨다가 시험이 깨져 되돌렸다. 같은 이유로 agy 는 'agy:embedded', grok 은 'xai:grok-4.5' 를 유지한다."
+      "_scope_note": "Keep the historical OpenAI effort comparison scope stable for evidence compatibility. GPT-6 uses the same named reasoning-effort dial; records remain separated by model_family (gpt-6 vs gpt-5.6). GPT-6 Sol/Luna support none; Astra does not."
     }
   },
   "cold_start_prior": {
@@ -394,5 +574,30 @@
     "claude-main": "implementation from a settled spec, codebase work, draft production",
     "grok-adversarial": "counter-examples, adversarial review, logical blind spots",
     "agy-compat": "compatibility checks, format work, alternate-vendor perspective"
-  }
+  },
+  "_runtime_observations": {
+    "claude_opus_alias_2026_09_20": {
+      "scope": "CLI response metadata, not provider-signed identity",
+      "observed_model_usage_keys": [
+        "claude-opus-4-8",
+        "claude-opus-5"
+      ],
+      "implication": "The fixed opus alias is dynamic; independent verification accepts exactly one key from the explicit backend allowlist."
+    }
+  },
+  "_codex_account_inventory": {
+    "captured_at": "2026-09-23",
+    "cli_version": "codex-cli 0.155.1",
+    "probe": "app-server model/list, includeHidden=true, limit=100, nextCursor=null",
+    "available_recommendation_models": [
+      "gpt-6-luna",
+      "gpt-6-sol",
+      "gpt-6-astra"
+    ],
+    "official_but_not_exposed": [],
+    "note": "Availability reflects the active Orca Pro session per owner confirmation. A separate ~/.codex/auth.json model/list snapshot omitted GPT-6 Sol/Luna and is not authoritative for this session.",
+    "stale_after_days": 1,
+    "source": "Owner-confirmed active Orca Codex Pro session; local ~/.codex app-server listing was a separate credential context."
+  },
+  "_catalog_policy_note": "provider-catalog-v1 resolves current observed IDs/efforts with reviewed resolver/dependency hashes; no inventory auto-mutation, permission change or runtime/provider identity proof. Historical family-quality policy and legacy rollback values remain below."
 }
