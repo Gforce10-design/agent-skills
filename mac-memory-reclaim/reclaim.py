@@ -29,6 +29,11 @@ PAGE_DEFAULT = 16384  # Apple Silicon page size; overridden from vm_stat header
 BACKBONE = re.compile("|".join([
     r"oMLX", r"openclaw", r"hermes", r"tui_gateway",
     r"codex app-server", r"codex_goal_watch", r"caffeinate",
+    # C2C deliberately detaches its active per-workspace bridge to launchd.
+    # ppid == 1 is expected here and must not make `--apply-safe` stop it.
+    r"/codex-with-chatgpt/(?:dist|src)/cli/index\.(?:js|ts) serve --workspace(?: |$)",
+    # alpha-c2c's bundled bridge detaches the same way.
+    r"/alpha-c2c-(?:claude|codex)/scripts/bridge\.py serve --workspace(?: |$)",
 ]), re.I)
 # Agent CLIs — protected unless proven leaked/orphaned (active-processor-wait).
 AGENT = re.compile(r"(^|/| )(claude|codex|grok)( |$|--)", re.I)
